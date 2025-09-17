@@ -1,0 +1,74 @@
+FROM node:20-bullseye
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    openjdk-17-jdk \
+    android-tools-adb \
+    android-tools-fastboot \
+    wget \
+    unzip \
+    curl \
+    git \
+    python3 \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+# Install Android SDK
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=$ANDROID_HOME
+ENV PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools
+
+# Create Android SDK directory
+RUN mkdir -p $ANDROID_HOME
+
+# Download and install Android SDK command line tools
+RUN wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O /tmp/cmdline-tools.zip && \
+    unzip /tmp/cmdline-tools.zip -d $ANDROID_HOME && \
+    mv $ANDROID_HOME/cmdline-tools $ANDROID_HOME/tools && \
+    rm /tmp/cmdline-tools.zip
+
+# Accept Android SDK licenses
+RUN yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses
+
+# Install Android SDK components
+RUN $ANDROID_HOME/tools/bin/sdkmanager \
+    "platform-tools" \
+    "platforms;android-34" \
+    "build-tools;34.0.0" \
+    "system-images;android-34;google_apis;x86_64" \
+    "emulator"
+
+# Install Gradle
+RUN wget https://services.gradle.org/distributions/gradle-8.3-bin.zip -O /tmp/gradle.zip && \
+    unzip /tmp/gradle.zip -d /opt && \
+    ln -s /opt/gradle-8.3/bin/gradle /usr/local/bin/gradle && \
+    rm /tmp/gradle.zip
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install Node.js dependencies
+RUN npm ci
+
+# Copy project files
+COPY . .
+
+# Create non-root user
+RUN useradd -m -s /bin/bash android && \
+    chown -R android:android /app && \
+    chown -R android:android $ANDROID_HOME
+
+USER android
+
+# Expose ADB port
+EXPOSE 5037
+
+# Default command
+CMD ["bash"]

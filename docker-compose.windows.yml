@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: revampai-postgres
+    environment:
+      POSTGRES_DB: ceo_platform
+      POSTGRES_USER: ceo_user
+      POSTGRES_PASSWORD: ceo_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      postgres 
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ceo_user -d ceo_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - revampai-network
+
+  # Redis for caching and real-time
+  redis:
+    image: redis:7-alpine
+    container_name: revampai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./backend/docker/redis/redis.conf:/etc/redis/redis.conf
+    command: redis-server /etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - revampai-network
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile.dev
+    container_name: revampai-backend
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://ceo_user:ceo_password@postgres:5432/ceo_platform
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
+      PORT: 3000
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/package.json:/app/package.json
+      - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./backend/.env:/app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - revampai-network
+
+  # React Native Metro Bundler
+  metro:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.metro
+    container_name: revampai-metro
+    ports:
+      - "8081:8081"
+    environment:
+      NODE_ENV: development
+      REACT_NATIVE_PACKAGER_HOSTNAME: 0.0.0.0
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    working_dir: /app
+    command: npm start
+    restart: unless-stopped
+    networks:
+      - revampai-network
+
+  # Android Development Environment
+  android-dev:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.android
+    container_name: revampai-android
+    ports:
+      - "5037:5037"  # ADB port
+    environment:
+      - ANDROID_HOME=/opt/android-sdk
+      - PATH=/opt/android-sdk/platform-tools:/opt/android-sdk/tools:/opt/android-sdk/tools/bin:$PATH
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - android_sdk:/opt/android-sdk
+    working_dir: /app
+    privileged: true
+    restart: unless-stopped
+    networks:
+      - revampai-network
+    profiles:
+      - android
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  android_sdk:
+    driver: local
+
+networks:
+  revampai-network:
+    driver: bridge

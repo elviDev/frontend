@@ -1,0 +1,45 @@
+FROM node:20-alpine
+
+# Install necessary packages for React Native
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    git \
+    bash \
+    curl \
+    watchman
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY babel.config.js ./
+COPY metro.config.js ./
+COPY tailwind.config.js ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S reactnative && \
+    adduser -S reactnative -u 1001
+
+# Set ownership
+RUN chown -R reactnative:reactnative /app
+USER reactnative
+
+# Expose Metro port
+EXPOSE 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8081/status || exit 1
+
+# Start Metro bundler
+CMD ["npm", "start", "--", "--host", "0.0.0.0", "--port", "8081"]
