@@ -77,7 +77,7 @@ export const TaskOverviewCard: React.FC<TaskOverviewCardProps> = ({
               style={{ backgroundColor: TaskUtils.getStatusColor(task.status) }}
             />
             <Text className="text-gray-900 font-semibold text-sm">
-              {task.status.replace('-', ' ')}
+              {task.status?.replace(/_/g, ' ') || 'pending'}
             </Text>
           </View>
         </TouchableOpacity>

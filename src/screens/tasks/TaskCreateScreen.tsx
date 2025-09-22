@@ -157,15 +157,17 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
   const loadInitialData = async () => {
     setIsLoadingData(true);
     try {
-      // Load available users for assignment
-      await loadAvailableUsers();
-      
-      // If editing, load existing task data
+      // If editing, load existing task data first (which will load assignees for the task's channel)
       if (isEditMode && route.params?.taskId) {
         await loadExistingTask(route.params.taskId);
-      } else if (channelId) {
-        // Pre-fill channel if creating from channel
-        setFormData(prev => ({ ...prev, channel_id: channelId }));
+      } else {
+        // For new task creation, load available users for assignment
+        await loadAvailableUsers();
+        
+        if (channelId) {
+          // Pre-fill channel if creating from channel
+          setFormData(prev => ({ ...prev, channel_id: channelId }));
+        }
       }
     } catch (error) {
       console.error('Error loading initial data:', error);
@@ -255,38 +257,101 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
       if (response.success && response.data) {
         const task = response.data;
         
-        // Wait a bit to ensure availableAssignees are loaded
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Transform task data to form data - only use real assignee data
-        const taskAssignees = availableAssignees.filter(user => 
-          task.assigned_to.includes(user.id)
-        );
-        
-        // If assignees can't be resolved, warn user
-        if (task.assigned_to.length > 0 && taskAssignees.length === 0) {
-          console.warn('⚠️ Could not resolve assignees for existing task');
-          showWarning('Some assignees could not be loaded. Please re-assign team members.', 5000);
+        // First, set the channel_id from task data to ensure we load the right assignees
+        if (task.channel_id) {
+          // Load assignees for this specific channel
+          try {
+            console.log('🔄 Loading channel members for task channel:', task.channel_id);
+            const membersResponse = await channelService.getChannelMembers(task.channel_id, { limit: 100 });
+            
+            if (membersResponse?.data) {
+              const channelMembers = membersResponse.data.map((member: any) => ({
+                id: member.user_id,
+                name: member.user_name || 'Unknown User',
+                avatar: member.user_avatar || member.user_name?.charAt(0).toUpperCase() || '?',
+                role: member.role || 'Member',
+                email: member.user_email || `${member.user_id || 'unknown'}@company.com`,
+              }));
+              
+              setAvailableAssignees(channelMembers);
+              console.log('✅ Task channel members loaded:', channelMembers.length, 'members');
+              
+              // Now resolve assignees with the loaded data
+              const taskAssignees = channelMembers.filter(user => 
+                task.assigned_to.includes(user.id)
+              );
+              
+              // If assignees can't be resolved, warn user
+              if (task.assigned_to.length > 0 && taskAssignees.length === 0) {
+                console.warn('⚠️ Could not resolve assignees for existing task');
+                showWarning('Some assignees could not be loaded. Please re-assign team members.', 5000);
+              }
+              
+              // Set form data with resolved assignees
+              setFormData({
+                title: task.title,
+                description: task.description || '',
+                priority: task.priority,
+                category: task.task_type as any,
+                startDate: task.start_date ? new Date(task.start_date) : new Date(),
+                endDate: task.due_date ? new Date(task.due_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                estimatedHours: task.estimated_hours?.toString() || '',
+                tags: task.tags || [],
+                assignees: taskAssignees,
+                features: [], // TODO: Map from custom_fields if needed
+                deliverables: [], // TODO: Map from subtasks if needed
+                successCriteria: [], // TODO: Map from acceptance_criteria
+                documentLinks: [], // TODO: Map from external_references
+                attachments: [], // TODO: Map from attachments
+                channel_id: task.channel_id,
+                owned_by: task.owned_by,
+              });
+            }
+          } catch (channelError) {
+            console.error('Error loading channel members:', channelError);
+            showWarning('Could not load team members for this task.', 3000);
+            
+            // Set form data without assignees
+            setFormData({
+              title: task.title,
+              description: task.description || '',
+              priority: task.priority,
+              category: task.task_type as any,
+              startDate: task.start_date ? new Date(task.start_date) : new Date(),
+              endDate: task.due_date ? new Date(task.due_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              estimatedHours: task.estimated_hours?.toString() || '',
+              tags: task.tags || [],
+              assignees: [],
+              features: [],
+              deliverables: [],
+              successCriteria: [],
+              documentLinks: [],
+              attachments: [],
+              channel_id: task.channel_id,
+              owned_by: task.owned_by,
+            });
+          }
+        } else {
+          // No channel_id in task, set form data without assignees
+          setFormData({
+            title: task.title,
+            description: task.description || '',
+            priority: task.priority,
+            category: task.task_type as any,
+            startDate: task.start_date ? new Date(task.start_date) : new Date(),
+            endDate: task.due_date ? new Date(task.due_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            estimatedHours: task.estimated_hours?.toString() || '',
+            tags: task.tags || [],
+            assignees: [],
+            features: [],
+            deliverables: [],
+            successCriteria: [],
+            documentLinks: [],
+            attachments: [],
+            channel_id: task.channel_id,
+            owned_by: task.owned_by,
+          });
         }
-        
-        setFormData({
-          title: task.title,
-          description: task.description || '',
-          priority: task.priority,
-          category: task.task_type as any,
-          startDate: task.start_date ? new Date(task.start_date) : new Date(),
-          endDate: task.due_date ? new Date(task.due_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          estimatedHours: task.estimated_hours?.toString() || '',
-          tags: task.tags || [],
-          assignees: taskAssignees,
-          features: [], // TODO: Map from custom_fields if needed
-          deliverables: [], // TODO: Map from subtasks if needed
-          successCriteria: [], // TODO: Map from acceptance_criteria
-          documentLinks: [], // TODO: Map from external_references
-          attachments: [], // TODO: Map from attachments
-          channel_id: task.channel_id,
-          owned_by: task.owned_by,
-        });
       }
     } catch (error) {
       console.error('Error loading task:', error);

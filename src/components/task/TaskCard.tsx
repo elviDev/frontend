@@ -130,7 +130,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               className="text-xs font-semibold uppercase"
               style={{ color: TaskUtils.getStatusColor(task.status) }}
             >
-              {task.status.replace('-', ' ')}
+              {task.status?.replace(/_/g, ' ') || 'pending'}
             </Text>
           </View>
 
