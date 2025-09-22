@@ -314,13 +314,6 @@ class AuthService {
   }
 
   async refreshToken(): Promise<AuthTokens> {
-    // In development, don't try to refresh - just clear tokens
-    if (__DEV__) {
-      console.log('🚫 Development mode: Refresh token disabled, clearing tokens');
-      await this.clearTokens();
-      throw new Error('Development mode: Token refresh disabled');
-    }
-
     const refreshToken = await this.getRefreshToken();
 
     if (!refreshToken) {
@@ -375,7 +368,7 @@ class AuthService {
   }
 
   // Token management
-  private async storeTokens(tokens: AuthTokens): Promise<void> {
+  private async storeTokens(tokens: AuthTokens & { user?: User }): Promise<void> {
     try {
       const expirationTime = Date.now() + tokens.expiresIn * 1000;
       console.log('🔒 Storing tokens via TokenManager:', {
@@ -506,14 +499,10 @@ class AuthService {
     try {
       return await apiCall();
     } catch (error: any) {
-      // In development mode, don't try to refresh tokens
-      if (__DEV__) {
-        throw error;
-      }
-      
       if (
         error.message?.includes('401') ||
-        error.message?.includes('Unauthorized')
+        error.message?.includes('Unauthorized') ||
+        error.statusCode === 401
       ) {
         try {
           // Use centralized token manager for refresh

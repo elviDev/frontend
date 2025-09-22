@@ -1,9 +1,17 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, Dimensions } from 'react-native';
-import Animated, { FadeIn, SlideInUp, SlideOutDown, FadeOut } from 'react-native-reanimated';
+import React, { useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import Animated, { 
+  SlideInUp, 
+  SlideOutDown, 
+  useSharedValue, 
+  useAnimatedStyle, 
+  useAnimatedGestureHandler, 
+  withSpring,
+  runOnJS 
+} from 'react-native-reanimated';
+import { PanGestureHandler } from 'react-native-gesture-handler';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import IonIcon from 'react-native-vector-icons/Ionicons';
-import LinearGradient from 'react-native-linear-gradient';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -30,10 +38,59 @@ export const ActionSheet: React.FC<ActionSheetProps> = ({
   options,
   onClose,
 }) => {
+  const translateY = useSharedValue(0);
+  const opacity = useSharedValue(1);
+
+  // Reset values when the ActionSheet becomes visible
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+      opacity.value = 1;
+    }
+  }, [visible, translateY, opacity]);
+
   const handleOptionPress = (option: ActionSheetOption) => {
+    // Execute action immediately without delay
     option.onPress();
+    // Close modal immediately after action
     onClose();
   };
+
+  const gestureHandler = useAnimatedGestureHandler({
+    onStart: (_, context) => {
+      context.startY = translateY.value;
+    },
+    onActive: (event, context) => {
+      // Only allow downward movement
+      const newTranslateY = context.startY + event.translationY;
+      if (newTranslateY >= 0) {
+        translateY.value = newTranslateY;
+        // Reduce opacity as user swipes down
+        opacity.value = Math.max(0.3, 1 - newTranslateY / 200);
+      }
+    },
+    onEnd: (event) => {
+      const shouldDismiss = event.translationY > 100 || event.velocityY > 500;
+      
+      if (shouldDismiss) {
+        // Animate out and close
+        translateY.value = withSpring(300, { damping: 20, stiffness: 300 });
+        opacity.value = withSpring(0, { damping: 20, stiffness: 300 });
+        runOnJS(onClose)();
+      } else {
+        // Snap back to original position
+        translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
+        opacity.value = withSpring(1, { damping: 20, stiffness: 300 });
+      }
+    },
+  });
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: translateY.value }],
+      opacity: opacity.value,
+    };
+  });
 
   const getIconComponent = (option: ActionSheetOption) => {
     if (!option.icon) return null;
@@ -46,78 +103,83 @@ export const ActionSheet: React.FC<ActionSheetProps> = ({
     return <MaterialIcon name={option.icon} size={20} color={iconColor} />;
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      presentationStyle="overFullScreen"
-      hardwareAccelerated={true}
+    <View
+      style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+      }}
     >
-      <Animated.View
-        entering={FadeIn.duration(300)}
-        exiting={FadeOut.duration(200)}
-        style={{
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.65)',
-          justifyContent: 'flex-end',
-          zIndex: 9999,
-        }}
-      >
-        {/* Backdrop */}
-        <TouchableOpacity
-          style={{ 
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-          }}
-          onPress={onClose}
-          activeOpacity={1}
-        />
-        
+      <PanGestureHandler onGestureEvent={gestureHandler}>
         <Animated.View
-          entering={SlideInUp.duration(450).springify().damping(18).stiffness(120)}
+          entering={SlideInUp.duration(400).springify().damping(12).stiffness(100)}
           exiting={SlideOutDown.duration(250)}
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderTopLeftRadius: 28,
-            borderTopRightRadius: 28,
-            paddingBottom: 34,
-            maxHeight: screenHeight * 0.8,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: -8 },
-            shadowOpacity: 0.15,
-            shadowRadius: 28,
-            elevation: 25,
-            borderTopWidth: 0.5,
-            borderTopColor: 'rgba(0, 0, 0, 0.05)',
-          }}
+          style={[
+            {
+              backgroundColor: '#FFFFFF',
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              paddingBottom: 34,
+              maxHeight: screenHeight * 0.7,
+              shadowColor: '#000000',
+              shadowOffset: { width: 0, height: -8 },
+              shadowOpacity: 0.15,
+              shadowRadius: 24,
+              elevation: 20,
+              borderTopWidth: 1,
+              borderLeftWidth: 1,
+              borderRightWidth: 1,
+              borderColor: '#F1F5F9',
+            },
+            animatedStyle,
+          ]}
         >
-          {/* Elegant Handle bar */}
-          <View className="items-center py-3">
+          {/* Draggable Handle bar */}
+          <TouchableOpacity 
+            onPress={onClose}
+            className="items-center py-4"
+            activeOpacity={0.7}
+          >
             <View 
               style={{
-                width: 40,
-                height: 4,
-                backgroundColor: '#E5E7EB',
-                borderRadius: 2,
+                width: 48,
+                height: 5,
+                backgroundColor: '#CBD5E1',
+                borderRadius: 3,
               }}
             />
-          </View>
+          </TouchableOpacity>
 
           {/* Clean Header */}
           {(title || message) && (
-            <View className="px-6 pb-4">
+            <View style={{
+              paddingHorizontal: 24,
+              paddingBottom: 16,
+              marginBottom: 8,
+            }}>
               {title && (
-                <Text className="text-lg font-bold text-gray-900 text-center mb-2">
+                <Text style={{
+                  fontSize: 18,
+                  fontWeight: '600',
+                  color: '#0F172A',
+                  textAlign: 'center',
+                  marginBottom: 6,
+                }}>
                   {title}
                 </Text>
               )}
               {message && (
-                <Text className="text-sm text-gray-500 text-center leading-5 px-2">
+                <Text style={{
+                  fontSize: 14,
+                  color: '#64748B',
+                  textAlign: 'center',
+                  lineHeight: 20,
+                }}>
                   {message}
                 </Text>
               )}
@@ -126,80 +188,91 @@ export const ActionSheet: React.FC<ActionSheetProps> = ({
 
           {/* Clean Options */}
           <ScrollView showsVerticalScrollIndicator={false}>
-            <View className="px-6 pb-4">
-              {options.map((option, index) => (
-                <TouchableOpacity
-                  key={index}
-                  onPress={() => handleOptionPress(option)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingHorizontal: 20,
-                    paddingVertical: 18,
-                    marginVertical: 4,
-                    borderRadius: 16,
-                    backgroundColor: option.style === 'cancel' 
-                      ? '#F9FAFB' 
-                      : 'white',
-                    borderBottomWidth: index < options.length - 1 ? 0.5 : 0,
-                    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
-                  }}
-                  className="active:bg-gray-50"
-                >
-                  {option.icon && (
-                    <View 
-                      style={{
+            <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
+              {options.map((option, index) => {
+                const isCancel = option.style === 'cancel';
+                const isDestructive = option.style === 'destructive';
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    onPress={() => handleOptionPress(option)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                      marginBottom: isCancel ? 12 : 6,
+                      marginTop: isCancel ? 8 : 0,
+                      borderRadius: 16,
+                      backgroundColor: isCancel 
+                        ? '#F8FAFC' 
+                        : '#FFFFFF',
+                      borderWidth: isCancel ? 1 : 0,
+                      borderColor: '#E2E8F0',
+                      borderBottomWidth: !isCancel && index < options.length - 1 ? 0.5 : 0,
+                      borderBottomColor: '#F1F5F9',
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    {option.icon && (
+                      <View style={{
                         width: 40,
                         height: 40,
                         borderRadius: 20,
                         alignItems: 'center',
                         justifyContent: 'center',
-                        marginRight: 16,
-                        backgroundColor: option.style === 'destructive' 
-                          ? '#FEF2F2' 
-                          : option.style === 'cancel'
-                          ? '#F3F4F6'
-                          : '#F0F9FF',
-                      }}
-                    >
-                      {getIconComponent(option)}
-                    </View>
-                  )}
-                  <View className="flex-1">
-                    <Text
-                      style={{
-                        fontSize: 17,
-                        fontWeight: '600',
-                        color: option.style === 'destructive'
-                          ? '#DC2626'
-                          : option.style === 'cancel'
-                          ? '#6B7280'
-                          : '#111827',
-                      }}
-                    >
-                      {option.text}
-                    </Text>
-                    {option.style === 'destructive' && (
-                      <Text className="text-xs text-red-400 mt-1">
-                        This action cannot be undone
-                      </Text>
+                        marginRight: 12,
+                        backgroundColor: isDestructive 
+                          ? '#FEF2F2'
+                          : isCancel
+                          ? '#F1F5F9'
+                          : '#F8FAFC',
+                      }}>
+                        {getIconComponent(option)}
+                      </View>
                     )}
-                  </View>
-                  
-                  {/* Clean Arrow for non-cancel options */}
-                  {option.style !== 'cancel' && (
-                    <MaterialIcon 
-                      name="chevron-right" 
-                      size={22} 
-                      color="#9CA3AF" 
-                    />
-                  )}
-                </TouchableOpacity>
-              ))}
+                    
+                    <View className="flex-1">
+                      <Text
+                        style={{
+                          fontSize: 16,
+                          fontWeight: '500',
+                          color: isDestructive
+                            ? '#DC2626'
+                            : isCancel
+                            ? '#64748B'
+                            : '#0F172A',
+                          marginBottom: isDestructive ? 2 : 0,
+                        }}
+                      >
+                        {option.text}
+                      </Text>
+                      {isDestructive && (
+                        <Text style={{
+                          fontSize: 12,
+                          color: '#94A3B8',
+                          fontWeight: '400',
+                        }}>
+                          This action cannot be undone
+                        </Text>
+                      )}
+                    </View>
+                    
+                    {!isCancel && (
+                      <MaterialIcon 
+                        name="chevron-right" 
+                        size={20} 
+                        color="#CBD5E1"
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </ScrollView>
         </Animated.View>
-      </Animated.View>
-    </Modal>
+      </PanGestureHandler>
+    </View>
   );
 };

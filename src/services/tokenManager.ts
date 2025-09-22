@@ -20,6 +20,8 @@ class TokenManager {
   private static instance: TokenManager;
   private tokenCache: TokenData | null = null;
   private listeners: Array<(token: string | null) => void> = [];
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private isRefreshing: boolean = false;
 
   private constructor() {}
 
@@ -80,6 +82,9 @@ class TokenManager {
 
       // Update cache
       this.tokenCache = tokenData;
+
+      // Schedule proactive refresh
+      this.scheduleTokenRefresh(tokenData.expiresAt);
 
       // Notify listeners (WebSocket, etc.)
       this.notifyListeners(tokenData.accessToken);
@@ -151,6 +156,9 @@ class TokenManager {
             userId: userId || undefined
           };
           
+          // Schedule refresh for the existing token
+          this.scheduleTokenRefresh(expiresAt);
+          
           console.log('🔄 TokenManager: Retrieved valid token from storage');
           return accessToken;
         } else {
@@ -190,6 +198,12 @@ class TokenManager {
 
       // Clear cache
       this.tokenCache = null;
+
+      // Clear refresh timer
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+      }
 
       // Notify listeners that token is gone
       this.notifyListeners(null);
@@ -242,22 +256,48 @@ class TokenManager {
   }
 
   /**
+   * Schedule proactive token refresh
+   */
+  private scheduleTokenRefresh(expiresAt: number): void {
+    // Clear existing timer
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+
+    // Calculate time to refresh (5 minutes before expiration)
+    const refreshTime = expiresAt - Date.now() - (5 * 60 * 1000); // 5 minutes buffer
+    
+    if (refreshTime > 0) {
+      console.log(`🔄 TokenManager: Scheduling refresh in ${Math.round(refreshTime / 1000 / 60)} minutes`);
+      
+      this.refreshTimer = setTimeout(async () => {
+        console.log('⏰ TokenManager: Proactive token refresh triggered');
+        await this.refreshAccessToken();
+      }, refreshTime);
+    } else {
+      // Token expires soon, refresh immediately
+      console.log('⚠️ TokenManager: Token expires soon, refreshing immediately');
+      setTimeout(() => this.refreshAccessToken(), 1000);
+    }
+  }
+
+  /**
    * Refresh access token using refresh token
    */
   async refreshAccessToken(): Promise<string | null> {
+    // Prevent concurrent refresh attempts
+    if (this.isRefreshing) {
+      console.log('🔄 TokenManager: Refresh already in progress, waiting...');
+      return await this.getCurrentToken();
+    }
+
     try {
+      this.isRefreshing = true;
       console.log('🔄 TokenManager: Attempting to refresh access token...');
       
       const refreshToken = await this.getRefreshToken();
       if (!refreshToken) {
         console.log('❌ TokenManager: No refresh token available');
-        await this.clearTokens();
-        return null;
-      }
-
-      // In development, don't try to refresh - just clear tokens
-      if (__DEV__) {
-        console.log('🚫 Development mode: Refresh token disabled, clearing tokens');
         await this.clearTokens();
         return null;
       }
@@ -312,6 +352,8 @@ class TokenManager {
     } catch (error) {
       console.error('❌ TokenManager: Error during token refresh:', error);
       return null;
+    } finally {
+      this.isRefreshing = false;
     }
   }
 

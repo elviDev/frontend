@@ -36,10 +36,8 @@ import { TaskStatsCards } from '../../components/task/TaskStatsCards';
 import { TaskSearchAndFilters } from '../../components/task/TaskSearchAndFilters';
 import { TaskFilterModal } from '../../components/task/TaskFilterModal';
 import { TaskViewRenderer } from '../../components/task/TaskViewRenderer';
-import { TaskCard } from '../../components/task/TaskCard';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { useWebSocket } from '../../services/websocketService';
-import Feather from 'react-native-vector-icons/Feather';
 
 type TasksScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -47,7 +45,7 @@ export const TasksScreen: React.FC = () => {
   const navigation = useNavigation<TasksScreenNavigationProp>();
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();
-  const { isConnected } = useWebSocket();
+  useWebSocket();
   const isFocused = useIsFocused();
 
   // Navigation safety state
@@ -85,15 +83,9 @@ export const TasksScreen: React.FC = () => {
   // Local state
   const [searchQueryLocal, setSearchQueryLocal] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [sortBy, setSortBy] = useState<TaskSort>({
-    field: 'due_date',
-    direction: 'asc',
-  });
   const [viewModeError, setViewModeError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
 
   // Handle view mode compatibility
   const compatibleViewMode = viewModeState === 'timeline' ? 'list' : viewModeState as 'list' | 'board' | 'calendar';
@@ -154,25 +146,28 @@ export const TasksScreen: React.FC = () => {
         hasData: !!result?.data,
         pagination: result?.pagination
       });
+
+      return result;
     } catch (error: any) {
       console.error('TasksScreen: Failed to load tasks:', {
         name: error?.name,
         message: error?.message,
-        stack: error?.stack,
         statusCode: error?.statusCode,
         details: error?.details
       });
       
-      // Don't re-throw the error - let the UI continue to function
-      // The Redux state will have the error message and tasks might still be visible
+      // Return null to indicate failure - calling code can handle appropriately
+      return null;
     }
   };
 
   const loadTaskStats = async () => {
     try {
-      await dispatch(fetchTaskStats()).unwrap();
+      const result = await dispatch(fetchTaskStats()).unwrap();
+      return result;
     } catch (error) {
-      console.error('Failed to load task stats:', error);
+      console.error('TasksScreen: Failed to load task stats:', error);
+      return null;
     }
   };
 
@@ -267,27 +262,20 @@ export const TasksScreen: React.FC = () => {
 
   // Event handlers
   const handleTaskPress = (task: Task) => {
+    if (!task?.id) {
+      console.error('TasksScreen: Invalid task data - missing ID');
+      return;
+    }
+
+    if (!navigation || !navigationReady) {
+      console.error('TasksScreen: Navigation not ready for task navigation');
+      return;
+    }
+
     try {
-      if (!navigation || !navigationReady) {
-        console.error('TasksScreen: Navigation not ready for task navigation');
-        return;
-      }
       navigation.navigate('TaskDetailScreen', { taskId: task.id });
     } catch (error) {
-      console.error(
-        'TasksScreen: Error navigating to TaskDetailScreen:',
-        error,
-      );
-      // Retry after a brief delay
-      setTimeout(() => {
-        try {
-          if (navigation && navigationReady) {
-            navigation.navigate('TaskDetailScreen', { taskId: task.id });
-          }
-        } catch (retryError) {
-          console.error('TasksScreen: Retry navigation failed:', retryError);
-        }
-      }, 100);
+      console.error('TasksScreen: Error navigating to TaskDetailScreen:', error);
     }
   };
 
@@ -301,30 +289,16 @@ export const TasksScreen: React.FC = () => {
   };
 
   const handleCreateTask = useCallback(() => {
+    if (!navigation || !navigationReady) {
+      console.error('TasksScreen: Navigation context not available or not ready');
+      return;
+    }
+    
     try {
-      // Check if navigation is available and ready before attempting to navigate
-      if (!navigation || !navigationReady) {
-        console.error('TasksScreen: Navigation context not available or not ready');
-        return;
-      }
-      
       console.log('TasksScreen: Navigating to TaskCreateScreen');
       navigation.navigate('TaskCreateScreen', {});
     } catch (error) {
-      console.error(
-        'TasksScreen: Error navigating to TaskCreateScreen:',
-        error,
-      );
-      // Retry after a brief delay if navigation context becomes available
-      setTimeout(() => {
-        try {
-          if (navigation && navigationReady) {
-            navigation.navigate('TaskCreateScreen', {});
-          }
-        } catch (retryError) {
-          console.error('TasksScreen: Retry navigation failed:', retryError);
-        }
-      }, 100);
+      console.error('TasksScreen: Error navigating to TaskCreateScreen:', error);
     }
   }, [navigation, navigationReady]);
 
@@ -334,28 +308,10 @@ export const TasksScreen: React.FC = () => {
   };
 
   const handleSortPress = () => {
-    setSortBy(prev => ({
-      ...prev,
-      direction: prev.direction === 'asc' ? 'desc' : 'asc',
-    }));
+    // Future: implement sorting functionality
+    console.log('Sort functionality to be implemented');
   };
 
-  // Render functions
-  const renderTaskCard = ({
-    item: task,
-    index,
-  }: {
-    item: Task;
-    index: number;
-  }) => (
-    <TaskCard
-      task={task}
-      index={index}
-      onPress={handleTaskPress}
-      onLongPress={handleTaskLongPress}
-      viewMode="list"
-    />
-  );
 
   return (
     <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>

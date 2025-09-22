@@ -211,59 +211,11 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         }
       }
       
-      // Fallback: populate with known channel members if API failed
+      // If API failed and no members loaded, show error state instead of fallback
       if (channelMembers.length === 0 && targetChannelId) {
-        console.log('🎭 Using fallback data with known channel members');
-        
-        // Create realistic fallback data based on known member IDs from database
-        const knownMembers = [
-          {
-            id: 'c451ca2a-8c73-49d9-8206-cee979936dd0',
-            name: 'Waka Jeje',
-            avatar: 'WJ',
-            role: 'Manager',
-            email: 'wakajeje@gmail.com',
-          },
-          {
-            id: '6b11255d-6f4f-4066-8c34-7adbd2f8eb16',
-            name: 'Alexander Mitchell',
-            avatar: 'AM',
-            role: 'CEO',
-            email: 'alex.ceo@company.com',
-          },
-          {
-            id: '30b9b15a-dc38-4443-b7db-33f9a30ef2ba',
-            name: 'Sarah Chen',
-            avatar: 'SC',
-            role: 'Manager',
-            email: 'sarah.manager@seeddata.com',
-          },
-        ];
-        
-        // Filter to include current user and other realistic members
-        channelMembers = knownMembers;
-        
-        // Ensure current user is included if not already
-        const currentUserExists = channelMembers.some(member => member.id === user?.id);
-        if (!currentUserExists && user?.id) {
-          channelMembers.unshift({
-            id: user.id,
-            name: user.name || 'You',
-            avatar: user.name ? user.name.split(' ').map(n => n[0]).join('') : 'YU',
-            role: 'Current User',
-            email: user.email || 'you@company.com',
-          });
-        }
-      } else if (channelMembers.length === 0) {
-        // If no channel selected, show empty state or basic fallback
-        console.log('🎭 No channel selected - using basic fallback');
-        channelMembers = user?.id ? [{
-          id: user.id,
-          name: user.name || 'You',
-          avatar: user.name ? user.name.split(' ').map(n => n[0]).join('') : 'YU',
-          role: 'Current User',
-          email: user.email || 'you@company.com',
-        }] : [];
+        console.warn('⚠️ Failed to load channel members - no fallback data available');
+        showWarning('Could not load team members. Please select a different channel or try again.', 5000);
+        return;
       }
       
       // Ensure current user is in the list if not already
@@ -306,21 +258,16 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         // Wait a bit to ensure availableAssignees are loaded
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Transform task data to form data
+        // Transform task data to form data - only use real assignee data
         const taskAssignees = availableAssignees.filter(user => 
           task.assigned_to.includes(user.id)
         );
         
-        // If no assignees found in current list, create basic assignee objects
-        const finalAssignees = taskAssignees.length > 0 
-          ? taskAssignees 
-          : task.assigned_to.map(userId => ({
-              id: userId,
-              name: `User ${userId.substring(0, 8)}`,
-              avatar: userId.substring(0, 2).toUpperCase(),
-              role: 'Team Member',
-              email: `${userId}@company.com`,
-            }));
+        // If assignees can't be resolved, warn user
+        if (task.assigned_to.length > 0 && taskAssignees.length === 0) {
+          console.warn('⚠️ Could not resolve assignees for existing task');
+          showWarning('Some assignees could not be loaded. Please re-assign team members.', 5000);
+        }
         
         setFormData({
           title: task.title,
@@ -331,7 +278,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
           endDate: task.due_date ? new Date(task.due_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           estimatedHours: task.estimated_hours?.toString() || '',
           tags: task.tags || [],
-          assignees: finalAssignees,
+          assignees: taskAssignees,
           features: [], // TODO: Map from custom_fields if needed
           deliverables: [], // TODO: Map from subtasks if needed
           successCriteria: [], // TODO: Map from acceptance_criteria
@@ -531,7 +478,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         response = await taskService.createTask(taskData);
       }
 
-      if (response.success) {
+      if (response.success && response.data) {
         // Success animation
         buttonScale.value = withSpring(1);
         
@@ -541,16 +488,23 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
 
         showSuccess(successMessage, 4000);
         
-        // Navigate after a brief delay to let user see the toast
+        // Wait for success confirmation and ensure the task ID is available
+        const taskId = response.data.id || route.params?.taskId;
+        if (!taskId) {
+          throw new Error('Task created but ID not returned from server');
+        }
+        
+        // Navigate after a brief delay to let user see the toast and ensure data is ready
         setTimeout(() => {
           if (isEditMode && route.params?.taskId) {
             navigation.replace('TaskDetailScreen', { taskId: route.params.taskId });
           } else {
-            navigation.navigate('Tabs', { screen: 'Tasks' });
+            // For new tasks, navigate to the specific task detail screen to ensure it's available
+            navigation.navigate('TaskDetailScreen', { taskId: taskId });
           }
         }, 1500);
       } else {
-        throw new Error('Failed to save task');
+        throw new Error('Failed to save task - no success response');
       }
     } catch (error) {
       console.error(`Error ${isEditMode ? 'updating' : 'creating'} task:`, error);
@@ -572,37 +526,6 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
     route.params?.taskId,
   ]);
 
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      priority: 'medium',
-      category: 'general',
-      startDate: new Date(),
-      endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      estimatedHours: '',
-      tags: [],
-      assignees: user?.id ? [availableAssignees.find(u => u.id === user.id)!].filter(Boolean) : [],
-      features: [],
-      deliverables: [],
-      successCriteria: [],
-      documentLinks: [],
-      attachments: [],
-      channel_id: channelId,
-      owned_by: user?.id,
-    });
-    setCurrentPage(1);
-    setFormErrors({
-      title: '',
-      description: '',
-      assignees: '',
-      startDate: '',
-      endDate: '',
-      channel: '',
-      general: '',
-    });
-    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
-  };
 
   // Input handlers with error clearing
   const updateFormData = useCallback(

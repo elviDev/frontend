@@ -168,35 +168,14 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         currentUserMember.role = 'Current User';
         setAvailableMembers([currentUserMember, ...otherMembers]);
       } else {
-        // Fallback: create current user member manually if not found in list
-        const fallbackCurrentUser: Member = {
-          id: currentUser.id,
-          name: 'You',
-          avatar: currentUser.avatar_url || currentUser.name.charAt(0).toUpperCase(),
-          role: 'Current User',
-          email: currentUser.email,
-          department: currentUser.department,
-          job_title: currentUser.job_title,
-        };
-        setAvailableMembers([fallbackCurrentUser, ...otherMembers]);
+        // Current user not found in members list - set empty state
+        setAvailableMembers(otherMembers);
       }
     } catch (error) {
       console.error('❌ Failed to load available members:', error);
-      // Fallback to mock data for better user experience
-      const fallbackMembers: Member[] = [
-        { id: 'current_user', name: 'You', avatar: 'Y', role: 'Current User' },
-        { id: '1', name: 'John Smith', avatar: 'J', role: 'Team Lead' },
-        { id: '2', name: 'Sarah Johnson', avatar: 'S', role: 'Designer' },
-        { id: '3', name: 'Mike Wilson', avatar: 'M', role: 'Developer' },
-        { id: '4', name: 'Emma Davis', avatar: 'E', role: 'UX Designer' },
-        { id: '5', name: 'Alex Chen', avatar: 'A', role: 'Backend Dev' },
-        { id: '6', name: 'Lisa Garcia', avatar: 'L', role: 'Product Manager' },
-        { id: '7', name: 'Tom Anderson', avatar: 'T', role: 'Marketing' },
-        { id: '8', name: 'David Kim', avatar: 'D', role: 'CEO' },
-      ];
-      console.log('🎭 Using fallback members:', fallbackMembers);
-      setAvailableMembers(fallbackMembers);
-      showWarning('Unable to load team members from server. Using cached data.');
+      // Set empty state when unable to load members
+      setAvailableMembers([]);
+      showError('Unable to load team members. Please try again later.');
     } finally {
       setLoadingMembers(false);
     }
@@ -222,16 +201,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       setCategories(categoriesWithCounts);
     } catch (error) {
       console.error('❌ Failed to load categories:', error);
-      // Fallback to mock categories for better user experience
-      const fallbackCategories: Category[] = [
-        { id: 'general', name: 'General', description: 'General discussions', count: Math.floor(Math.random() * 8) + 2, color: '#6B7280', icon: 'chatbubble-outline' },
-        { id: 'project', name: 'Project', description: 'Project discussions', count: Math.floor(Math.random() * 12) + 3, color: '#3B82F6', icon: 'folder-outline' },
-        { id: 'department', name: 'Department', description: 'Department communications', count: Math.floor(Math.random() * 6) + 1, color: '#10B981', icon: 'business-outline' },
-        { id: 'announcement', name: 'Announcement', description: 'Important announcements', count: Math.floor(Math.random() * 4) + 1, color: '#F59E0B', icon: 'megaphone-outline' },
-        { id: 'private', name: 'Private', description: 'Private discussions', count: Math.floor(Math.random() * 5) + 1, color: '#8B5CF6', icon: 'lock-closed-outline' },
-      ];
-      console.log('🎭 Using fallback categories:', fallbackCategories);
-      setCategories(fallbackCategories);
+      // Set empty state when unable to load categories
+      setCategories([]);
     }
   }, [channels]);
 
@@ -286,64 +257,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         
         setChannels(displayChannels);
       } catch (apiError) {
-        console.warn('Failed to fetch from API, using fallback data:', apiError);
-        // Fallback to demo data
-        setChannels([
-          {
-            id: '1',
-            title: 'Project Alpha',
-            description: 'Strategic planning and brainstorming for our next major product launch.',
-            category: 'work',
-            tags: ['strategy', 'planning', 'launch'],
-            members: [
-              { id: '1', name: 'John', avatar: 'J', role: 'Team Lead' },
-              { id: '2', name: 'Sarah', avatar: 'S', role: 'Designer' },
-              { id: '3', name: 'Mike', avatar: 'M', role: 'Developer' },
-            ],
-            memberAvatars: ['J', 'S', 'M'],
-            messages: 24,
-            files: 8,
-            memberCount: 3,
-            privacy: 'public',
-            createdAt: new Date(),
-          },
-          {
-            id: '2',
-            title: 'Design System',
-            description: 'Building and maintaining our comprehensive design system and component library.',
-            category: 'design',
-            tags: ['ui', 'components', 'tokens'],
-            members: [
-              { id: '2', name: 'Sarah', avatar: 'S', role: 'Designer' },
-              { id: '5', name: 'Lisa', avatar: 'L', role: 'UI Designer' },
-              { id: '6', name: 'Emma', avatar: 'E', role: 'UX Designer' },
-            ],
-            memberAvatars: ['S', 'L', 'E'],
-            messages: 18,
-            files: 12,
-            memberCount: 3,
-            privacy: 'public',
-            createdAt: new Date(),
-          },
-          {
-            id: '3',
-            title: 'API Development',
-            description: 'Backend development discussions, API design, and technical implementation.',
-            category: 'development',
-            tags: ['backend', 'api', 'database'],
-            members: [
-              { id: '3', name: 'Mike', avatar: 'M', role: 'Developer' },
-              { id: '7', name: 'Alex', avatar: 'A', role: 'Backend Dev' },
-              { id: '8', name: 'Chris', avatar: 'C', role: 'DevOps' },
-            ],
-            memberAvatars: ['M', 'A', 'C'],
-            messages: 31,
-            files: 5,
-            memberCount: 3,
-            privacy: 'private',
-            createdAt: new Date(),
-          },
-        ]);
+        console.warn('Failed to fetch from API:', apiError);
+        // Set empty state when unable to load channels
+        setChannels([]);
       }
       
     } catch (error) {
@@ -367,13 +283,16 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     loadAvailableMembers();
   }, [loadAvailableMembers]);
 
-  // Initialize form with current user as member
+  // Initialize form with current user as member when available
   useEffect(() => {
     if (showCreateChannel && formData.members.length === 0 && availableMembers.length > 0) {
-      setFormData(prev => ({
-        ...prev,
-        members: [availableMembers[0]] // Current user
-      }));
+      const currentUser = availableMembers.find(member => member.name === 'You');
+      if (currentUser) {
+        setFormData(prev => ({
+          ...prev,
+          members: [currentUser]
+        }));
+      }
     }
   }, [showCreateChannel, availableMembers, formData.members.length]);
 
@@ -557,8 +476,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   const toggleMember = useCallback((member: Member) => {
     // Use functional updates to avoid dependencies
     setAvailableMembers(currentMembers => {
-      // Don't allow removing current user (first member in the list)
-      if (currentMembers.length > 0 && member.id === currentMembers[0].id) return currentMembers;
+      // Don't allow removing current user if they exist
+      const currentUser = currentMembers.find(m => m.name === 'You');
+      if (currentUser && member.id === currentUser.id) return currentMembers;
       
       setFormData(prev => ({
         ...prev,

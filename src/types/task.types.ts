@@ -17,6 +17,31 @@ export interface TaskComment {
   author: TaskAssignee;
   timestamp: Date;
   attachments?: TaskAttachment[];
+  reactions?: {
+    thumbs_up: number;
+    thumbs_down: number;
+  };
+  userReactions?: {
+    [userId: string]: ('thumbs_up' | 'thumbs_down')[];
+  };
+  // API response fields
+  task_id?: string;
+  author_id?: string;
+  author_name?: string;
+  author_email?: string;
+  is_edited?: boolean;
+  edited_at?: string;
+  edited_by?: string;
+  edited_by_name?: string;
+  parent_comment_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  up_count?: string;
+  down_count?: string;
+  total_reactions?: string;
+  user_reaction?: 'up' | 'down' | 'thumbs_up' | 'thumbs_down' | null;
 }
 
 export interface TaskAttachment {

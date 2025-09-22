@@ -18,7 +18,7 @@ export const TaskPriorityModal: React.FC<TaskPriorityModalProps> = ({
   onPriorityChange,
   onClose,
 }) => {
-  const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+  const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent', 'critical'];
 
   return (
     <Modal visible={visible} transparent animationType="fade">

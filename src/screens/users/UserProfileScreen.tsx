@@ -405,10 +405,6 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
       'Are you sure you want to logout?',
       () => {
         logout();
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Auth' }],
-        });
       },
       undefined,
       {
@@ -1019,7 +1015,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             </ScrollView>
 
             {/* Action Buttons */}
-            <View className="flex-row space-x-3 pt-4 border-t border-gray-200">
+            <View className="flex-row gap-x-4 pt-4 border-t border-gray-200">
               <TouchableOpacity
                 onPress={() => setShowPasswordModal(false)}
                 className="flex-1 bg-gray-100 rounded-xl py-4"

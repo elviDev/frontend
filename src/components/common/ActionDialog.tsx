@@ -138,7 +138,8 @@ export const ActionDialog: React.FC<ActionDialogProps> = ({
                       style={[
                         styles.actionButton,
                         buttonStyle,
-                        index < actions.length - 1 && styles.actionButtonSpacing,
+                        index < actions.length - 1 &&
+                          styles.actionButtonSpacing,
                       ]}
                       onPress={() => {
                         action.onPress();
@@ -146,26 +147,21 @@ export const ActionDialog: React.FC<ActionDialogProps> = ({
                       }}
                     >
                       {!isCancel ? (
-                        <LinearGradient
-                          colors={
-                            action.style === 'destructive'
-                              ? ['#EF4444', '#DC2626']
-                              : ['#3B82F6', '#1D4ED8']
-                          }
-                          style={styles.gradientButton}
-                        >
-                          <View style={styles.buttonContent}>
-                            {action.icon && (
-                              <MaterialIcon
-                                name={action.icon}
-                                size={18}
-                                color="white"
-                                style={styles.buttonIcon}
-                              />
-                            )}
-                            <Text style={[styles.actionText, textStyle]}>{action.text}</Text>
-                          </View>
-                        </LinearGradient>
+                        <View style={styles.buttonContent}>
+                          {action.icon && (
+                            <MaterialIcon
+                              name={action.icon}
+                              size={18}
+                              color="white"
+                              style={styles.buttonIcon}
+                            />
+                          )}
+                          <Text
+                            style={[styles.actionText, { color: '#FFFFFF' }]}
+                          >
+                            {action.text}
+                          </Text>
+                        </View>
                       ) : (
                         <View style={styles.buttonContent}>
                           {action.icon && (
@@ -176,7 +172,15 @@ export const ActionDialog: React.FC<ActionDialogProps> = ({
                               style={styles.buttonIcon}
                             />
                           )}
-                          <Text style={[styles.actionText, textStyle]}>{action.text}</Text>
+                          <Text
+                            style={[
+                              styles.actionText,
+                              textStyle,
+                              { color: '#374151' },
+                            ]}
+                          >
+                            {action.text}
+                          </Text>
                         </View>
                       )}
                     </TouchableOpacity>

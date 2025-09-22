@@ -252,6 +252,9 @@ class TaskService {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
           ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
           ...options.headers,
         },
@@ -391,6 +394,9 @@ class TaskService {
       });
     }
 
+    // Add expand parameter to include assignee details
+    params.append('expand', 'assignee_details');
+    
     const queryString = params.toString();
     const endpoint = `/tasks${queryString ? `?${queryString}` : ''}`;
     
@@ -404,7 +410,15 @@ class TaskService {
    * Get single task by ID
    */
   async getTask(taskId: string): Promise<TaskResponse> {
-    return this.makeRequest<TaskResponse>(`/tasks/${taskId}`);
+    // Add timestamp to prevent any HTTP caching
+    const timestamp = Date.now();
+    return this.makeRequest<TaskResponse>(`/tasks/${taskId}?t=${timestamp}&_refresh=${Math.random()}`, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
   }
 
   /**
@@ -769,25 +783,148 @@ class TaskService {
       throw new Error('Task ID is required');
     }
     
-    return this.makeRequest<CommentsListResponse>(`/tasks/${taskId}/comments`);
+    console.log('📋 TaskService getTaskComments:', { taskId });
+    
+    // Check if using mock auth for development
+    if (await this.isUsingMockAuth()) {
+      console.log('🎭 Using mock comments for development');
+      return {
+        success: true,
+        data: [
+          {
+            id: 'comment-1',
+            content: 'This is a sample comment for testing',
+            author: {
+              id: 'dev-user-id',
+              name: 'Development User',
+              avatar: 'D',
+              role: 'Developer',
+              email: 'dev@company.com'
+            },
+            timestamp: new Date(Date.now() - 60000), // 1 minute ago
+            reactions: { thumbs_up: 0, thumbs_down: 0 },
+            userReactions: {}
+          }
+        ],
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    // Add timestamp to prevent any HTTP caching
+    const timestamp = Date.now();
+    return this.makeRequest<CommentsListResponse>(`/tasks/${taskId}/comments?t=${timestamp}`);
   }
 
   /**
    * Add comment to task
    */
-  async addComment(taskId: string, content: string): Promise<CommentResponse> {
+  async addComment(taskId: string, content: string, authorId?: string): Promise<CommentResponse> {
     if (!taskId?.trim()) {
-      throw new Error('Task ID is required');
+      const error = new Error('Task ID is required') as TaskServiceError;
+      error.code = 'INVALID_TASK_ID';
+      throw error;
     }
     
     if (!content?.trim()) {
-      throw new Error('Comment content is required');
+      const error = new Error('Comment content is required') as TaskServiceError;
+      error.code = 'INVALID_CONTENT';
+      throw error;
     }
     
-    return this.makeRequest<CommentResponse>(`/tasks/${taskId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({ content: content.trim() }),
+    if (content.trim().length > 5000) {
+      const error = new Error('Comment content is too long (maximum 5000 characters)') as TaskServiceError;
+      error.code = 'CONTENT_TOO_LONG';
+      throw error;
+    }
+    
+    const payload: any = { 
+      content: content.trim(),
+      task_id: taskId
+    };
+    
+    // Include author ID if provided  
+    if (authorId?.trim()) {
+      payload.author_id = authorId;
+      payload.user_id = authorId; // Some backends use user_id instead
+      payload.created_by = authorId; // Some backends use created_by
+    }
+    
+    // Add timestamp
+    payload.timestamp = new Date().toISOString();
+    payload.created_at = new Date().toISOString();
+    
+    console.log('📋 TaskService addComment request:', {
+      taskId,
+      contentLength: content.trim().length,
+      hasAuthorId: !!authorId,
+      payload: {
+        ...payload,
+        content: `${payload.content.substring(0, 50)}${payload.content.length > 50 ? '...' : ''}`
+      }
     });
+    
+    try {
+      // Check if using mock auth for development
+      if (await this.isUsingMockAuth()) {
+        console.log('🎭 Using mock comment creation for development');
+        const mockComment: TaskComment = {
+          id: `comment-${Date.now()}`,
+          content: payload.content,
+          author: {
+            id: authorId || 'dev-user-id',
+            name: 'Development User',
+            avatar: 'D',
+            role: 'Developer',
+            email: 'dev@company.com'
+          },
+          timestamp: new Date(),
+          reactions: { thumbs_up: 0, thumbs_down: 0 },
+          userReactions: {}
+        };
+        
+        return {
+          success: true,
+          data: mockComment,
+          timestamp: new Date().toISOString()
+        };
+      }
+      
+      const response = await this.makeRequest<CommentResponse>(`/tasks/${taskId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      
+      console.log('📋 TaskService addComment success:', {
+        taskId,
+        commentId: response.data?.id,
+        hasAuthor: !!response.data?.author
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('📋 TaskService addComment failed:', {
+        taskId,
+        authorId,
+        contentLength: content.trim().length,
+        error: error instanceof Error ? error.message : error,
+        statusCode: (error as any)?.statusCode,
+        code: (error as any)?.code
+      });
+      
+      // Enhance error with context
+      if (error instanceof Error) {
+        const enhancedError = error as TaskServiceError;
+        enhancedError.details = {
+          ...enhancedError.details,
+          taskId,
+          authorId,
+          contentLength: content.trim().length,
+          operation: 'addComment'
+        };
+      }
+      
+      throw error;
+    }
   }
 
   /**
@@ -828,6 +965,82 @@ class TaskService {
       method: 'DELETE',
     });
   }
+
+  /**
+   * React to comment
+   */
+  async reactToComment(taskId: string, commentId: string, reaction: 'thumbs_up' | 'thumbs_down'): Promise<CommentResponse> {
+    if (!taskId?.trim()) {
+      const error = new Error('Task ID is required') as TaskServiceError;
+      error.code = 'INVALID_TASK_ID';
+      throw error;
+    }
+    
+    if (!commentId?.trim()) {
+      const error = new Error('Comment ID is required') as TaskServiceError;
+      error.code = 'INVALID_COMMENT_ID';
+      throw error;
+    }
+    
+    if (!['thumbs_up', 'thumbs_down'].includes(reaction)) {
+      const error = new Error('Invalid reaction type') as TaskServiceError;
+      error.code = 'INVALID_REACTION';
+      throw error;
+    }
+    
+    // Convert frontend reaction format to backend format
+    const reactionType = reaction === 'thumbs_up' ? 'up' : 'down';
+    
+    console.log('📋 TaskService reactToComment request:', {
+      taskId,
+      commentId,
+      reaction,
+      reactionType
+    });
+    
+    try {
+      console.log('📋 Making real API call for comment reaction');
+      
+      const response = await this.makeRequest<CommentResponse>(`/tasks/${taskId}/comments/${commentId}/reactions`, {
+        method: 'POST',
+        body: JSON.stringify({ reaction_type: reactionType }),
+      });
+      
+      console.log('📋 TaskService reactToComment success:', {
+        taskId,
+        commentId,
+        reaction,
+        response: response,
+        hasData: !!response.data
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('📋 TaskService reactToComment failed:', {
+        taskId,
+        commentId,
+        reaction,
+        error: error instanceof Error ? error.message : error,
+        statusCode: (error as any)?.statusCode,
+        code: (error as any)?.code
+      });
+      
+      // Enhance error with context
+      if (error instanceof Error) {
+        const enhancedError = error as TaskServiceError;
+        enhancedError.details = {
+          ...enhancedError.details,
+          taskId,
+          commentId,
+          reaction,
+          operation: 'reactToComment'
+        };
+      }
+      
+      throw error;
+    }
+  }
+
 
   /**
    * Escape CSV field content

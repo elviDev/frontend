@@ -20,9 +20,10 @@ export const TaskStatusModal: React.FC<TaskStatusModalProps> = ({
 }) => {
   const statusOptions: TaskStatus[] = [
     'pending',
-    'in-progress',
+    'in_progress',
+    'review',
     'completed',
-    'on-hold',
+    'on_hold',
     'cancelled'
   ];
 

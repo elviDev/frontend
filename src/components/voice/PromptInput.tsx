@@ -10,6 +10,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -61,6 +62,7 @@ interface PromptInputProps {
   placeholder?: string;
   disabled?: boolean;
   showCloseButton?: boolean; // For modal mode
+  isLoading?: boolean; // Show loading indicator
   channelMembers?: MentionUser[]; // Add channel members for mentions
   replyingTo?: {
     id: string;
@@ -106,6 +108,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   placeholder = 'Enter a prompt here...',
   disabled = false,
   showCloseButton = false,
+  isLoading = false,
   channelMembers = [],
   replyingTo,
   onCancelReply,
@@ -895,8 +898,12 @@ export const PromptInput: React.FC<PromptInputProps> = ({
                     <MaterialIcon name="send" size={24} color="#4285F4" />
                   </TouchableOpacity>
                 ) : text.trim() ? (
-                  <TouchableOpacity onPress={handleSend}>
-                    <MaterialIcon name="send" size={24} color="#4285F4" />
+                  <TouchableOpacity onPress={handleSend} disabled={isLoading}>
+                    {isLoading ? (
+                      <ActivityIndicator size="small" color="#4285F4" />
+                    ) : (
+                      <MaterialIcon name="send" size={24} color="#4285F4" />
+                    )}
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity onPress={startRecording}>

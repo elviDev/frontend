@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
 import Feather from 'react-native-vector-icons/Feather';
@@ -30,10 +30,26 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const isOverdue = TaskUtils.isOverdue(dueDate, task.status);
   const isDueSoon = TaskUtils.isDueSoon(dueDate, task.status);
   
-  // Handle both field formats for assignees
-  const assignees = task.assignees || (task.assigned_to ? task.assigned_to.map(id => ({ id, name: 'User', avatar: id.slice(0, 2).toUpperCase() })) : []);
-  const channelName = task.channelName || task.channel_name || 'General';
-  const progress = task.progress || task.progress_percentage || 0;
+  // Only use real assignee data from backend - no fallbacks
+  const assignees = React.useMemo(() => {
+    // Only use assignee_details from backend response with complete data
+    if ((task as any).assignee_details && Array.isArray((task as any).assignee_details)) {
+      return (task as any).assignee_details
+        .filter((assigneeDetail: any) => assigneeDetail.id && assigneeDetail.name) // Only valid data
+        .map((assigneeDetail: any) => ({
+          id: assigneeDetail.id,
+          name: assigneeDetail.name,
+          avatar: assigneeDetail.avatar_url || assigneeDetail.name.charAt(0).toUpperCase(),
+          role: assigneeDetail.role,
+          email: assigneeDetail.email,
+        }));
+    }
+    
+    // No fallbacks - return empty array if no proper data
+    return [];
+  }, [task]);
+  const channelName = task.channelName || task.channel_name;
+  const progress = task.progress || task.progress_percentage;
 
   return (
     <AnimatedTouchableOpacity
@@ -79,11 +95,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 {task.task_type || task.category || 'general'}
               </Text>
             </View>
-            <View className="bg-blue-50 rounded-full px-2 py-1">
-              <Text className="text-blue-600 text-xs font-medium">
-                {task.channelName || task.channel_id || 'General'}
-              </Text>
-            </View>
+            {channelName && (
+              <View className="bg-blue-50 rounded-full px-2 py-1">
+                <Text className="text-blue-600 text-xs font-medium">
+                  {channelName}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Title */}
@@ -133,7 +151,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       </View>
 
       {/* Progress Bar */}
-      {progress > 0 && (
+      {progress !== undefined && progress > 0 && (
         <View className="mb-3">
           <View className="flex-row items-center justify-between mb-1">
             <Text className="text-gray-500 text-xs">Progress</Text>
@@ -179,30 +197,59 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         <View className="flex-row items-center">
           {assignees && assignees.length > 0 ? (
             <View className="flex-row -space-x-2">
-              {assignees.slice(0, 3).map((assignee, avatarIndex) => (
-                <LinearGradient
-                  key={`${task.id}-${assignee.id}-${avatarIndex}`}
-                  colors={
-                    avatarIndex % 2 === 0
-                      ? ['#3B82F6', '#8B5CF6']
-                      : ['#8B5CF6', '#3B82F6']
-                  }
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 14,
-                    borderWidth: 2,
-                    borderColor: 'white',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: assignees.length - avatarIndex,
-                  }}
-                >
-                  <Text className="text-white text-xs font-bold">
-                    {assignee.avatar}
-                  </Text>
-                </LinearGradient>
-              ))}
+              {assignees.slice(0, 3).map((assignee, avatarIndex) => {
+                // Check if avatar is a URL (has http/https) or just initials
+                const isAvatarUrl = assignee.avatar && (assignee.avatar.startsWith('http://') || assignee.avatar.startsWith('https://'));
+                
+                return (
+                  <View
+                    key={`${task.id}-${assignee.id}-${avatarIndex}`}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      borderWidth: 2,
+                      borderColor: 'white',
+                      zIndex: assignees.length - avatarIndex,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {isAvatarUrl ? (
+                      <Image
+                        source={{ uri: assignee.avatar }}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                        }}
+                        onError={() => {
+                          // If image fails to load, this will fallback to initials
+                          console.warn('Failed to load avatar image:', assignee.avatar);
+                        }}
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={
+                          avatarIndex % 2 === 0
+                            ? ['#3B82F6', '#8B5CF6']
+                            : ['#8B5CF6', '#3B82F6']
+                        }
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text className="text-white text-xs font-bold">
+                          {assignee.avatar}
+                        </Text>
+                      </LinearGradient>
+                    )}
+                  </View>
+                );
+              })}
               {assignees.length > 3 && (
                 <View className="w-7 h-7 bg-gray-400 rounded-full border-2 border-white flex items-center justify-center">
                   <Text className="text-white text-xs font-bold">

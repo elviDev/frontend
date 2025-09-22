@@ -121,7 +121,7 @@ export const TaskDetailsCard: React.FC<TaskDetailsCardProps> = ({ task }) => {
     },
     task.owned_by && {
       label: 'Owner',
-      value: `User ${task.owned_by.substring(0, 8)}`,
+      value: (task as any).owner_name || task.reporter?.name || `User ${task.owned_by.substring(0, 8)}`,
       icon: 'person',
       color: '#8B5CF6'
     },
