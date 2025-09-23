@@ -20,8 +20,6 @@ export type MainStackParamList = {
     parentMessage: any;
     channelId: string;
     channelName: string;
-    members: any[];
-    onUpdateMessage: (messageId: string, replies: any[]) => void;
   };
   TaskDetailScreen: {
     taskId: string;

@@ -202,11 +202,9 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       const query = mentionMatch[1] || '';
       setMentionQuery(query);
       setShowMentionSuggestions(true);
-      console.log('✅ Mention detected:', query, 'at position:', cursorPos);
     } else {
       setShowMentionSuggestions(false);
       setMentionQuery('');
-      console.log('❌ No mention found in:', textBeforeCursor);
     }
   };
 

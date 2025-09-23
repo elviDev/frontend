@@ -60,8 +60,6 @@ export const Avatar: React.FC<AvatarProps> = ({
       return ['#6B7280', '#9CA3AF']; // Fallback gray gradient
     }
 
-    console.log('User ID:', user);
-    
     const userId = user?.id || '0';
     const numericId = parseInt(userId, 10) || 0;
     const gradientIndex = numericId % GRADIENT_COLORS.length;

@@ -2,7 +2,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TabNavigator } from './TabNavigator';
 import { ChannelDetailScreen } from '../screens/chats/ChannelDetailScreen';
-import { ThreadScreen } from '../screens/chats/ThreadScreen';
+import { ThreadScreen } from '../screens/messages/ThreadScreen';
 import { TaskDetailScreen } from '../screens/tasks/TaskDetailScreen';
 import { TaskCreateScreen } from '../screens/tasks/TaskCreateScreen';
 import { UserProfileScreen } from '../screens/users/UserProfileScreen';
@@ -19,8 +19,6 @@ export type MainStackParamList = {
     parentMessage: any;
     channelId: string;
     channelName: string;
-    members: any[];
-    onUpdateMessage: (messageId: string, replies: any[]) => void;
   };
   TaskDetailScreen: {
     taskId: string;

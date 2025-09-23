@@ -219,41 +219,23 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         const apiChannelsWithStats = await channelService.getChannelsWithStats();
         console.log('📊 Channels with stats loaded:', apiChannelsWithStats.length, 'channels');
         
-        // Get member details for each channel
-        const displayChannels: Channel[] = await Promise.all(
-          apiChannelsWithStats.map(async (apiChannel) => {
-            try {
-              // Fetch member details for better display
-              const membersResponse = await channelService.getChannelMembers(apiChannel.id, { limit: 10 });
-              const members: Member[] = membersResponse?.data?.slice(0, 10)?.map((member: any) => ({
-                id: member.user_id,
-                name: member.user_name || 'Unknown User',
-                avatar: member.user_avatar || undefined, // Let Avatar component handle fallback
-                role: member.role,
-              })) || [];
+        // Use member_details from API response directly
+        const displayChannels: Channel[] = apiChannelsWithStats.map((apiChannel) => {
+          // Use member_details from the API response
+          const members: Member[] = apiChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
+            id: memberDetail.id,
+            name: memberDetail.name || 'Unknown User',
+            avatar: memberDetail.avatar_url || memberDetail.name?.charAt(0)?.toUpperCase() || '?',
+            role: memberDetail.role,
+            email: memberDetail.email,
+          })) || [];
 
-              return mapApiChannelToDisplayChannel(apiChannel, {
-                messageCount: apiChannel.messageCount,
-                fileCount: apiChannel.fileCount,
-                members,
-              });
-            } catch (memberError: any) {
-              // Handle permission errors gracefully
-              if (memberError?.statusCode === 403 || memberError?.message?.includes('403')) {
-                console.log(`📝 Channel "${apiChannel.name}" members not accessible (private/restricted access)`);
-              } else {
-                console.warn('Failed to fetch members for channel:', apiChannel.name, memberError?.message || memberError);
-              }
-              
-              // Return channel without member details - this is expected for private channels
-              return mapApiChannelToDisplayChannel(apiChannel, {
-                messageCount: apiChannel.messageCount,
-                fileCount: apiChannel.fileCount,
-                members: [],
-              });
-            }
-          })
-        );
+          return mapApiChannelToDisplayChannel(apiChannel, {
+            messageCount: apiChannel.messageCount,
+            fileCount: apiChannel.fileCount,
+            members,
+          });
+        });
         
         setChannels(displayChannels);
       } catch (apiError) {
@@ -798,6 +780,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
                   category={channel.category}
                   tags={channel.tags}
                   memberAvatars={channel.memberAvatars}
+                  memberList={channel.members}
                   messages={channel.messages}
                   files={channel.files}
                   members={channel.memberCount}

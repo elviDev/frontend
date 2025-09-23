@@ -1,8 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError } from './authService';
 import { tokenManager } from '../tokenManager';
-import { messageService } from './messageService';
 import { API_BASE_URL } from '../../config/api';
+
+export interface MemberDetail {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatar_url?: string | null;
+}
 
 export interface Channel {
   id: string;
@@ -31,6 +38,7 @@ export interface Channel {
   last_activity_at: string;
   created_at: string;
   updated_at: string;
+  member_details?: MemberDetail[];
 }
 
 export interface Message {
@@ -124,14 +132,31 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
 }
 
 class ChannelService {
+  private tokenCache: { token: string | null; timestamp: number } = { token: null, timestamp: 0 };
+  private readonly TOKEN_CACHE_DURATION = 30000; // 30 seconds
+  
+  // Request deduplication cache to prevent identical concurrent requests
+  private pendingRequests: Map<string, Promise<any>> = new Map();
+
   private async getAuthToken(): Promise<string | null> {
     try {
+      // Check cache first
+      const now = Date.now();
+      if (this.tokenCache.token && (now - this.tokenCache.timestamp) < this.TOKEN_CACHE_DURATION) {
+        return this.tokenCache.token;
+      }
+
       // Use centralized token manager
       const token = await tokenManager.getCurrentToken();
+      
+      // Cache the token
+      this.tokenCache = { token, timestamp: now };
+      
       console.log('🔑 ChannelService: Token retrieval result:', {
         hasToken: !!token,
         tokenLength: token ? token.length : 0,
-        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none'
+        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none',
+        fromCache: false
       });
       
       // Additional validation
@@ -153,6 +178,15 @@ class ChannelService {
     options: RequestInit = {},
     retryCount: number = 0
   ): Promise<T> {
+    // Create a unique key for request deduplication
+    const requestKey = `${options.method || 'GET'}:${endpoint}:${JSON.stringify(options.body || '')}`;
+    
+    // Check if identical request is already in progress
+    if (this.pendingRequests.has(requestKey)) {
+      console.log(`🔄 ChannelService: Deduplicating request to ${endpoint}`);
+      return this.pendingRequests.get(requestKey)!;
+    }
+
     const token = await this.getAuthToken();
 
     const headers: Record<string, string> = {
@@ -176,6 +210,27 @@ class ChannelService {
       endpoint
     });
     
+    // Create and cache the request promise
+    const requestPromise = this.executeRequest<T>(baseUrl, endpoint, options, headers, token, retryCount);
+    this.pendingRequests.set(requestKey, requestPromise);
+    
+    try {
+      const result = await requestPromise;
+      return result;
+    } finally {
+      // Clean up the pending request cache
+      this.pendingRequests.delete(requestKey);
+    }
+  }
+
+  private async executeRequest<T>(
+    baseUrl: string,
+    endpoint: string,
+    options: RequestInit,
+    headers: Record<string, string>,
+    token: string | null,
+    retryCount: number
+  ): Promise<T> {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -224,13 +279,21 @@ class ChannelService {
           
           // For other 401/403, try token refresh once
           if (retryCount === 0) {
-            console.log('🔄 ChannelService: Got 401/403, attempting token refresh...');
+            console.log('🔄 ChannelService: Got 401/403, attempting server token refresh...');
             try {
-              await tokenManager.refreshFromStorage();
-              console.log('🔄 ChannelService: Token refresh attempted, retrying request...');
+              // Clear token cache before refresh
+              this.tokenCache = { token: null, timestamp: 0 };
+              
+              // Actually refresh the token from the server
+              const newToken = await tokenManager.refreshAccessToken();
+              if (!newToken) {
+                throw new Error('Failed to obtain new token');
+              }
+              
+              console.log('🔄 ChannelService: Server token refresh successful, retrying request...');
               return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
             } catch (refreshError) {
-              console.error('🔄 ChannelService: Token refresh failed:', refreshError);
+              console.error('🔄 ChannelService: Server token refresh failed:', refreshError);
               throw new AuthError('Session expired. Please log in again.', 'SESSION_EXPIRED', 401);
             }
           }
@@ -406,6 +469,105 @@ class ChannelService {
     return response.success;
   }
 
+  async unpinMessage(channelId: string, messageId: string): Promise<boolean> {
+    const response = await this.makeRequest<ApiResponse<{ message: string }>>(`/channels/${channelId}/messages/${messageId}/pin`, {
+      method: 'DELETE',
+    });
+    return response.success;
+  }
+
+  async getMessageReplies(
+    channelId: string,
+    messageId: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+    }
+  ): Promise<PaginatedResponse<Message>> {
+    const queryParams = new URLSearchParams();
+    if (options?.limit) queryParams.set('limit', options.limit.toString());
+    if (options?.offset) queryParams.set('offset', options.offset.toString());
+
+    const queryString = queryParams.toString();
+    const url = `/channels/${channelId}/messages/${messageId}/replies${queryString ? '?' + queryString : ''}`;
+    
+    const response = await this.makeRequest<PaginatedResponse<Message>>(url);
+    return response;
+  }
+
+  async addMessageReply(
+    channelId: string,
+    messageId: string,
+    replyData: {
+      content: string;
+      message_type?: 'text' | 'voice' | 'file';
+      attachments?: any[];
+      mentions?: string[];
+    }
+  ): Promise<Message> {
+    const response = await this.makeRequest<ApiResponse<Message>>(`/channels/${channelId}/messages/${messageId}/thread`, {
+      method: 'POST',
+      body: JSON.stringify(replyData),
+    });
+    return response.data;
+  }
+
+  async editMessageReply(
+    channelId: string,
+    messageId: string,
+    replyId: string,
+    content: string
+  ): Promise<Message> {
+    const response = await this.makeRequest<ApiResponse<Message>>(`/channels/${channelId}/messages/${messageId}/replies/${replyId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+    return response.data;
+  }
+
+  async deleteMessageReply(
+    channelId: string,
+    messageId: string,
+    replyId: string
+  ): Promise<boolean> {
+    const response = await this.makeRequest<ApiResponse<{ message: string }>>(`/channels/${channelId}/messages/${messageId}/replies/${replyId}`, {
+      method: 'DELETE',
+    });
+    return response.success;
+  }
+
+  async removeMessageReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string
+  ): Promise<boolean> {
+    const response = await this.makeRequest<ApiResponse<{ message: string }>>(`/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, {
+      method: 'DELETE',
+    });
+    return response.success;
+  }
+
+  async getMessageReactions(
+    channelId: string,
+    messageId: string
+  ): Promise<{
+    message_id: string;
+    reactions: Array<{
+      emoji: string;
+      count: number;
+      users: Array<{
+        id: string;
+        name: string;
+        avatar_url?: string;
+      }>;
+    }>;
+    total_reactions: number;
+    user_reactions: string[];
+  }> {
+    const response = await this.makeRequest<ApiResponse<any>>(`/channels/${channelId}/messages/${messageId}/reactions`);
+    return response.data;
+  }
+
   async searchMessages(channelId: string, query: string, limit: number = 50): Promise<Message[]> {
     const response = await this.makeRequest<PaginatedResponse<Message>>(`/channels/${channelId}/messages?search=${encodeURIComponent(query)}&limit=${limit}`);
     return response.data;
@@ -437,29 +599,21 @@ class ChannelService {
     try {
       console.log('🔍 Fetching channel stats for:', channelId);
       
-      // Use messageService for messages since it has the correct API structure
+      // Message stats will be available from channel API when messages are re-implemented
       
-      const [messagesResponse, filesResponse, membersResponse] = await Promise.allSettled([
-        messageService.getChannelMessages(channelId, { limit: 1, offset: 0 }),
+      const [filesResponse, membersResponse] = await Promise.allSettled([
         this.getChannelFiles(channelId, { limit: 1, offset: 0 }),
         this.getChannelMembers(channelId, { limit: 1, offset: 0 })
       ]);
 
       // Enhanced logging for debugging
       console.log('📈 Stats responses:', {
-        messages: messagesResponse.status === 'fulfilled' ? 'success' : messagesResponse.reason,
+        messages: 'disabled - will be re-implemented',
         files: filesResponse.status === 'fulfilled' ? 'success' : filesResponse.reason,
         members: membersResponse.status === 'fulfilled' ? 'success' : membersResponse.reason,
       });
 
-      if (messagesResponse.status === 'fulfilled') {
-        console.log('📥 Message response structure:', {
-          hasData: !!messagesResponse.value?.data,
-          hasPagination: !!messagesResponse.value?.data?.pagination,
-          total: messagesResponse.value?.data?.pagination?.total,
-          structure: Object.keys(messagesResponse.value || {}),
-        });
-      }
+      // Messages logging disabled - will be re-implemented
 
       if (filesResponse.status === 'fulfilled') {
         console.log('📁 Files response structure:', {
@@ -477,9 +631,7 @@ class ChannelService {
         });
       }
 
-      const messageCount = messagesResponse.status === 'fulfilled' 
-        ? messagesResponse.value?.data?.pagination?.total || 0
-        : 0;
+      const messageCount = 0; // Will be available when messages are re-implemented
         
       const fileCount = filesResponse.status === 'fulfilled' 
         ? filesResponse.value?.pagination?.total || 0
@@ -510,37 +662,35 @@ class ChannelService {
   }
 
   /**
-   * Get channels with their statistics
+   * Get channels with their statistics (optimized - minimal requests)
    */
   async getChannelsWithStats(): Promise<(Channel & {
     messageCount: number;
     fileCount: number;
   })[]> {
     try {
+      console.log('🔄 Fetching channels with minimal API requests...');
       const channels = await this.getChannels();
       
-      // Fetch stats for all channels in parallel
-      const channelsWithStats = await Promise.all(
-        channels.map(async (channel) => {
-          const stats = await this.getChannelStats(channel.id);
-          return {
-            ...channel,
-            messageCount: stats.messageCount,
-            fileCount: stats.fileCount,
-          };
-        })
-      );
+      if (channels.length === 0) {
+        return [];
+      }
 
+      // Use existing channel data and skip individual stat requests for better performance
+      const channelsWithStats = channels.map((channel) => {
+        return {
+          ...channel,
+          messageCount: 0, // Will be available when messages are re-implemented
+          fileCount: 0, // Skip file count requests for now to improve performance
+          // Use member_count already provided by the channels API
+        };
+      });
+
+      console.log(`✅ Successfully loaded ${channels.length} channels with 1 total request (optimized)`);
       return channelsWithStats;
     } catch (error) {
-      console.error('Failed to fetch channels with stats:', error);
-      // Return channels without stats as fallback
-      const channels = await this.getChannels();
-      return channels.map(channel => ({
-        ...channel,
-        messageCount: 0,
-        fileCount: 0,
-      }));
+      console.error('❌ Failed to fetch channels with stats:', error);
+      return [];
     }
   }
 

@@ -6,6 +6,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
 } from 'react-native-reanimated';
+import { Avatar } from '../common/Avatar';
 
 interface ChannelHeaderProps {
   channelName: string;
@@ -39,10 +40,6 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = ({
     onBack();
   };
 
-  const getAvatarColor = (index: number) => {
-    const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-red-500', 'bg-yellow-500', 'bg-indigo-500'];
-    return colors[index % colors.length];
-  };
 
   return (
     <View className="bg-white px-6 py-4">
@@ -75,16 +72,20 @@ export const ChannelHeader: React.FC<ChannelHeaderProps> = ({
             {members.slice(0, 3).map((member, index) => (
               <View
                 key={member.id || index}
-                className={`w-8 h-8 ${getAvatarColor(index)} rounded-full border-2 border-white items-center justify-center shadow-sm`}
                 style={{ zIndex: members.length - index }}
+                className="border-2 border-white rounded-full shadow-sm"
               >
-                <Text className="text-white text-xs font-semibold">
-                  {(member.avatar && member.avatar.length === 1) 
-                    ? member.avatar 
-                    : (member.name || 'U').charAt(0).toUpperCase()}
-                </Text>
-                {/* Online indicator */}
-                <View className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-white" />
+                <Avatar
+                  user={{
+                    id: member.id || `member_${index}`,
+                    name: member.name || 'Unknown User',
+                    avatar: member.avatar || member.user_avatar,
+                    role: member.role,
+                    isOnline: member.isOnline !== false, // Default to online unless explicitly false
+                  }}
+                  size="sm"
+                  showOnlineStatus={true}
+                />
               </View>
             ))}
             {members.length > 3 && (

@@ -65,13 +65,27 @@ export interface UserStats {
 }
 
 class UserService {
+  private tokenCache: { token: string | null; timestamp: number } = { token: null, timestamp: 0 };
+  private readonly TOKEN_CACHE_DURATION = 30000; // 30 seconds
+
   private async getAuthToken(): Promise<string | null> {
     try {
+      // Check cache first
+      const now = Date.now();
+      if (this.tokenCache.token && (now - this.tokenCache.timestamp) < this.TOKEN_CACHE_DURATION) {
+        return this.tokenCache.token;
+      }
+
       const token = await tokenManager.getCurrentToken();
+      
+      // Cache the token
+      this.tokenCache = { token, timestamp: now };
+      
       console.log('🔑 UserService: Token retrieval result:', {
         hasToken: !!token,
         tokenLength: token ? token.length : 0,
-        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none'
+        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none',
+        fromCache: false
       });
       
       if (!token) {
@@ -153,15 +167,23 @@ class UserService {
 
         // Handle 401/403 errors
         if (response.status === 401 || response.status === 403) {
-          // Try token refresh once
+          // Try server token refresh once
           if (retryCount === 0) {
-            console.log('🔄 UserService: Got 401/403, attempting token refresh...');
+            console.log('🔄 UserService: Got 401/403, attempting server token refresh...');
             try {
-              await tokenManager.refreshFromStorage();
-              console.log('🔄 UserService: Token refresh attempted, retrying request...');
+              // Clear token cache before refresh
+              this.tokenCache = { token: null, timestamp: 0 };
+              
+              // Actually refresh the token from the server
+              const newToken = await tokenManager.refreshAccessToken();
+              if (!newToken) {
+                throw new Error('Failed to obtain new token');
+              }
+              
+              console.log('🔄 UserService: Server token refresh successful, retrying request...');
               return this.makeRequest(endpoint, options, 1);
             } catch (refreshError) {
-              console.error('🔄 UserService: Token refresh failed:', refreshError);
+              console.error('🔄 UserService: Server token refresh failed:', refreshError);
               throw new AuthError('Session expired. Please log in again.', 'SESSION_EXPIRED', 401);
             }
           }

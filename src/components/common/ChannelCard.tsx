@@ -17,15 +17,24 @@ import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
+interface Member {
+  id: string;
+  name: string;
+  avatar: string;
+  role: string;
+  email?: string;
+}
+
 interface ChannelCardProps {
   title: string;
   description: string;
   category: string;
   tags: string[];
-  memberAvatars: string[];
+  memberAvatars?: string[];
+  members: number;
+  memberList?: Member[];
   messages: number;
   files: number;
-  members: number;
   isPrivate: boolean;
   onPress: () => void;
   onOptionsPress: () => void;
@@ -37,10 +46,11 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   description,
   category,
   tags,
-  memberAvatars,
+  memberAvatars = [],
   messages,
   files,
   members,
+  memberList = [],
   isPrivate,
   onPress,
   onOptionsPress,
@@ -197,52 +207,32 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         >
           {/* Member Avatars */}
           <View className="flex-row -space-x-3">
-            {memberAvatars.slice(0, 4).map((avatarOrInitial, avatarIndex) => (
+            {/* Use memberList if available, otherwise fall back to memberAvatars */}
+            {(memberList.length > 0 ? memberList : memberAvatars.map((avatar, idx) => ({
+              id: `member_${idx}`,
+              name: 'Unknown User',
+              avatar,
+              role: 'member'
+            }))).slice(0, 4).map((member, avatarIndex) => (
               <Animated.View
-                key={avatarIndex}
+                key={member.id || avatarIndex}
                 entering={FadeInUp.delay(index * 150 + 500 + avatarIndex * 100)
                   .duration(400)
                   .springify()}
-                style={{ zIndex: memberAvatars.length - avatarIndex }}
+                style={{ zIndex: (memberList.length > 0 ? memberList.length : memberAvatars.length) - avatarIndex }}
               >
-                {/* Check if it's a URL (contains http) or just initials */}
-                {avatarOrInitial && (avatarOrInitial.startsWith('http') || avatarOrInitial.startsWith('https')) ? (
-                  <Avatar
-                    user={{
-                      id: `member_${avatarIndex}`,
-                      name: avatarOrInitial, // Name will be used for fallback if image fails
-                      avatar: avatarOrInitial,
-                    }}
-                    size="sm"
-                  />
-                ) : (
-                  <LinearGradient
-                    colors={avatarIndex % 2 === 0 ? ['#3933C6', '#A05FFF'] : ['#A05FFF', '#3933C6']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      borderWidth: 2,
-                      borderColor: 'white',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.1,
-                      shadowRadius: 3,
-                      elevation: 3,
-                    }}
-                  >
-                    <Text className="text-white text-xs font-bold">
-                      {avatarOrInitial?.charAt(0) || '?'}
-                    </Text>
-                  </LinearGradient>
-                )}
+                <Avatar
+                  user={{
+                    id: member.id,
+                    name: member.name,
+                    avatar: member.avatar,
+                    role: member.role,
+                  }}
+                  size="sm"
+                />
               </Animated.View>
             ))}
-            {memberAvatars.length > 4 && (
+            {(memberList.length > 0 ? memberList.length : memberAvatars.length) > 4 && (
               <Animated.View
                 entering={FadeInUp.delay(index * 150 + 500 + 4 * 100)
                   .duration(400)
@@ -251,7 +241,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
               >
                 <View className="w-9 h-9 bg-gray-400 rounded-full border-2 border-white flex items-center justify-center">
                   <Text className="text-white text-xs font-bold">
-                    +{memberAvatars.length - 4}
+                    +{(memberList.length > 0 ? memberList.length : memberAvatars.length) - 4}
                   </Text>
                 </View>
               </Animated.View>
