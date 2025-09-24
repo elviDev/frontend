@@ -7,6 +7,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -27,6 +28,7 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
+  const { t } = useTranslation();
   const { login, isLoading, error, clearAuthError } = useAuth();
   const { showSuccess, showError, showInfo, showToast } = useToast();
   const [credentials, setCredentials] = useState<LoginCredentials>({
@@ -52,13 +54,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     const newErrors: Partial<LoginCredentials> = {};
 
     if (!credentials.email) {
-      newErrors.email = 'Email is required';
+      newErrors.email = t('errors.emailRequired');
     } else if (!/\S+@\S+\.\S+/.test(credentials.email)) {
-      newErrors.email = 'Email is invalid';
+      newErrors.email = t('errors.emailInvalid');
     }
 
     if (!credentials.password) {
-      newErrors.password = 'Password is required';
+      newErrors.password = t('errors.passwordRequired');
     }
 
     setErrors(newErrors);
@@ -93,7 +95,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             }
           );
         } else {
-          showSuccess('Welcome back! Login successful.');
+          showSuccess(t('auth.loginSuccess'));
         }
         // Navigation will be handled by the AuthNavigator based on auth state
       } else {
@@ -154,8 +156,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             <View style={{ marginBottom: 40 }}>
               {/* Email Input */}
               <Input
-                label="Email"
-                placeholder="Enter your email"
+                label={t('auth.email')}
+                placeholder={t('auth.emailPlaceholder')}
                 value={credentials.email}
                 onChangeText={email =>
                   setCredentials(prev => ({ ...prev, email }))
@@ -168,8 +170,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
               {/* Password Input */}
               <Input
-                label="Password"
-                placeholder="Enter your password"
+                label={t('auth.password')}
+                placeholder={t('auth.passwordPlaceholder')}
                 value={credentials.password}
                 onChangeText={password =>
                   setCredentials(prev => ({ ...prev, password }))
@@ -181,7 +183,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
               {/* Sign In Button */}
               <Button
-                title="Sign In"
+                title={t('auth.login')}
                 onPress={handleLogin}
                 loading={isLoading}
                 style={{ marginBottom: 16 }}
@@ -199,7 +201,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                     fontWeight: '600',
                   }}
                 >
-                  Forgot Password?
+                  {t('auth.forgotPassword')}
                 </Text>
               </TouchableOpacity>
 
@@ -214,9 +216,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                     color: Colors.text.secondary,
                   }}
                 >
-                  Don't have an account?{' '}
+                  {t('auth.noAccount')}{' '}
                   <Text style={{ color: Colors.primary, fontWeight: '600' }}>
-                    Create account
+                    {t('auth.createAccount')}
                   </Text>
                 </Text>
               </TouchableOpacity>

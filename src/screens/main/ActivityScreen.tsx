@@ -10,9 +10,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store/store';
-import { useWebSocket } from '../../services/websocketService';
+import { useWebSocket } from '../../services/unifiedWebSocketService';
 import { activityService, Activity } from '../../services/api/activityService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { useAppTranslation } from '../../hooks/useAppTranslation';
 
 interface ActivityItem {
   id: string;
@@ -32,6 +33,7 @@ interface ActivityItem {
 }
 
 export const ActivityScreen: React.FC = () => {
+  const { t, navigation: nav } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useSelector((state: RootState) => state.auth);
   const { on, off, joinChannel, leaveChannel } = useWebSocket();

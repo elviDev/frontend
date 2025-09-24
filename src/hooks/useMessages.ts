@@ -4,7 +4,7 @@ import { useToast } from '../contexts/ToastContext';
 import { RootState } from '../store/store';
 import type { Message, TypingUser, ThreadInfo } from '../types/message';
 import { messageService } from '../services/messageService';
-import messageWebSocketService from '../services/messageWebSocketService';
+import unifiedWebSocketService from '../services/unifiedWebSocketService';
 
 interface SendMessageParams {
   content: string;
@@ -1087,33 +1087,33 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
     
     lastTypingTimestampRef.current = now;
-    messageWebSocketService.startTyping(channelId, threadRootId);
-    
+    unifiedWebSocketService.startTyping(channelId, threadRootId);
+
     // Clear existing timeout
     if (typingDebounceRef.current) {
       clearTimeout(typingDebounceRef.current);
     }
-    
+
     // Auto-stop typing after 3 seconds of inactivity
     typingDebounceRef.current = setTimeout(() => {
-      messageWebSocketService.stopTyping(channelId, threadRootId);
+      unifiedWebSocketService.stopTyping(channelId, threadRootId);
     }, 3000);
   }, [channelId, threadRootId]);
 
   const stopTyping = useCallback(() => {
-    messageWebSocketService.stopTyping(channelId, threadRootId);
-    
+    unifiedWebSocketService.stopTyping(channelId, threadRootId);
+
     // Clear all typing-related timeouts
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-    
+
     if (typingDebounceRef.current) {
       clearTimeout(typingDebounceRef.current);
       typingDebounceRef.current = null;
     }
-    
+
     lastTypingTimestampRef.current = 0;
   }, [channelId, threadRootId]);
 
@@ -1122,18 +1122,18 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     // Connect to WebSocket with enhanced error handling
     const connectWebSocket = async () => {
       try {
-        await messageWebSocketService.connect();
+        await unifiedWebSocketService.connect();
         console.log('✅ WebSocket connected for channel:', channelId);
       } catch (error) {
         console.error('❌ Failed to connect WebSocket:', error);
         setError('Failed to establish real-time connection. Some features may not work properly.');
       }
     };
-    
+
     connectWebSocket();
-    
+
     // Join channel for real-time updates
-    messageWebSocketService.joinChannel(channelId);
+    unifiedWebSocketService.joinChannel(channelId);
 
     // Message events
     const handleMessageSent = (data: any) => {
@@ -1306,26 +1306,26 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     };
 
     // Register event listeners
-    messageWebSocketService.on('message_sent', handleMessageSent);
-    messageWebSocketService.on('message_updated', handleMessageUpdated);
-    messageWebSocketService.on('message_deleted', handleMessageDeleted);
-    messageWebSocketService.on('thread_created', handleThreadCreated);
-    messageWebSocketService.on('thread_reply', handleThreadReply);
-    messageWebSocketService.on('reaction_toggled', handleReactionToggled);
-    messageWebSocketService.on('reactions_cleared', handleReactionsCleared);
-    messageWebSocketService.on('typing_indicator', handleTypingIndicator);
+    unifiedWebSocketService.on('message_sent', handleMessageSent);
+    unifiedWebSocketService.on('message_updated', handleMessageUpdated);
+    unifiedWebSocketService.on('message_deleted', handleMessageDeleted);
+    unifiedWebSocketService.on('thread_created', handleThreadCreated);
+    unifiedWebSocketService.on('thread_reply', handleThreadReply);
+    unifiedWebSocketService.on('reaction_toggled', handleReactionToggled);
+    unifiedWebSocketService.on('reactions_cleared', handleReactionsCleared);
+    unifiedWebSocketService.on('typing_indicator', handleTypingIndicator);
     
     // Enhanced connection state handling
     const handleConnectionStateChange = () => {
-      const connectionState = messageWebSocketService.getConnectionState;
+      const connectionState = unifiedWebSocketService.getConnectionState();
       console.log('📶 WebSocket connection state changed:', connectionState);
-      
+
       if (connectionState === 'connected') {
         setError(null); // Clear any connection errors
       } else if (connectionState === 'reconnecting') {
         setError('Reconnecting to server...');
       } else if (connectionState === 'disconnected') {
-        const reconnectionInfo = messageWebSocketService.reconnectionInfo;
+        const reconnectionInfo = unifiedWebSocketService.getReconnectionInfo();
         if (reconnectionInfo.attempts >= reconnectionInfo.maxAttempts) {
           setError('Connection lost. Please refresh the page to reconnect.');
         }
@@ -1397,28 +1397,28 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     };
     
     // Register enhanced event listeners
-    messageWebSocketService.on('connect', handleConnectionStateChange);
-    messageWebSocketService.on('disconnect', handleConnectionStateChange);
-    messageWebSocketService.on('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
-    messageWebSocketService.on('sync_response', handleSyncResponse);
+    unifiedWebSocketService.on('connect', handleConnectionStateChange);
+    unifiedWebSocketService.on('disconnect', handleConnectionStateChange);
+    unifiedWebSocketService.on('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+    unifiedWebSocketService.on('sync_response', handleSyncResponse);
 
     return () => {
       // Cleanup event listeners
-      messageWebSocketService.off('message_sent', handleMessageSent);
-      messageWebSocketService.off('message_updated', handleMessageUpdated);
-      messageWebSocketService.off('message_deleted', handleMessageDeleted);
-      messageWebSocketService.off('thread_created', handleThreadCreated);
-      messageWebSocketService.off('thread_reply', handleThreadReply);
-      messageWebSocketService.off('reaction_toggled', handleReactionToggled);
-      messageWebSocketService.off('reactions_cleared', handleReactionsCleared);
-      messageWebSocketService.off('typing_indicator', handleTypingIndicator);
-      messageWebSocketService.off('connect', handleConnectionStateChange);
-      messageWebSocketService.off('disconnect', handleConnectionStateChange);
-      messageWebSocketService.off('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
-      messageWebSocketService.off('sync_response', handleSyncResponse);
-      
+      unifiedWebSocketService.off('message_sent', handleMessageSent);
+      unifiedWebSocketService.off('message_updated', handleMessageUpdated);
+      unifiedWebSocketService.off('message_deleted', handleMessageDeleted);
+      unifiedWebSocketService.off('thread_created', handleThreadCreated);
+      unifiedWebSocketService.off('thread_reply', handleThreadReply);
+      unifiedWebSocketService.off('reaction_toggled', handleReactionToggled);
+      unifiedWebSocketService.off('reactions_cleared', handleReactionsCleared);
+      unifiedWebSocketService.off('typing_indicator', handleTypingIndicator);
+      unifiedWebSocketService.off('connect', handleConnectionStateChange);
+      unifiedWebSocketService.off('disconnect', handleConnectionStateChange);
+      unifiedWebSocketService.off('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+      unifiedWebSocketService.off('sync_response', handleSyncResponse);
+
       // Leave channel
-      messageWebSocketService.leaveChannel(channelId);
+      unifiedWebSocketService.leaveChannel(channelId);
     };
   }, [channelId, threadRootId]); // Removed transformApiMessage - it's now stable
 
@@ -1507,7 +1507,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
   const forceReconnect = useCallback(async () => {
     try {
       setError('Reconnecting...');
-      await messageWebSocketService.forceReconnect();
+      await unifiedWebSocketService.forceReconnect();
       setError(null);
       console.log('✅ Manual reconnection successful');
     } catch (error) {
@@ -1535,9 +1535,9 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     updateThreadInfo,
     forceReconnect,
     // Connection state
-    connectionState: messageWebSocketService.getConnectionState,
-    reconnectionInfo: messageWebSocketService.reconnectionInfo,
-    isConnected: messageWebSocketService.isConnected,
+    connectionState: unifiedWebSocketService.getConnectionState(),
+    reconnectionInfo: unifiedWebSocketService.getReconnectionInfo(),
+    isConnected: unifiedWebSocketService.isConnected(),
     // Thread state getters
     threadCache,
     threadInfoCache,
