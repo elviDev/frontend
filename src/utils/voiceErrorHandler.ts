@@ -1,5 +1,6 @@
 import { Alert, Linking } from 'react-native';
 import Voice from '../services/voice/CustomVoice';
+import i18n from '../i18n';
 
 export interface VoiceErrorInfo {
   code: number;
@@ -10,20 +11,20 @@ export interface VoiceErrorInfo {
 
 export const handleVoiceError = async (error: any): Promise<VoiceErrorInfo> => {
   const errorCode = error.error || error.code || 0;
-  const errorMessage = error.message || 'Unknown voice error';
-  
+  const errorMessage = error.message || i18n.t('errors.unknownError');
+
   console.log('🔍 Handling voice error:', { errorCode, errorMessage });
-  
+
   let suggestions: string[] = [];
   let canRetry = false;
-  
+
   switch (errorCode) {
     case 5: // ERROR_CLIENT
       suggestions = [
-        'Check if Google app is installed',
-        'Verify speech recognition services are available',
-        'Restart the app and try again',
-        'Check device compatibility with speech recognition'
+        i18n.t('voice.checkGoogleApp'),
+        i18n.t('voice.verifySpeechServices'),
+        i18n.t('voice.restartApp'),
+        i18n.t('voice.checkCompatibility')
       ];
       
       try {
@@ -32,11 +33,11 @@ export const handleVoiceError = async (error: any): Promise<VoiceErrorInfo> => {
         console.log('📊 ERROR_CLIENT Diagnostics:', diagnostics);
         
         if (!diagnostics.googleAppInstalled) {
-          suggestions.unshift('Install Google app from Play Store');
+          suggestions.unshift(i18n.t('voice.installGoogleApp'));
         }
-        
+
         if (!diagnostics.hasAudioPermission) {
-          suggestions.unshift('Grant microphone permission in app settings');
+          suggestions.unshift(i18n.t('voice.grantMicPermission'));
         }
         
         if (diagnostics.speechServicesCount === 0) {
@@ -52,46 +53,45 @@ export const handleVoiceError = async (error: any): Promise<VoiceErrorInfo> => {
       
     case 1: // ERROR_NETWORK
       suggestions = [
-        'Check internet connection',
-        'Try again when connected to Wi-Fi',
-        'Check if speech recognition requires internet'
+        i18n.t('voice.checkInternet'),
+        i18n.t('voice.speechRequiresInternet')
       ];
       canRetry = true;
       break;
       
     case 2: // ERROR_SERVER
       suggestions = [
-        'Speech recognition server error',
-        'Try again in a few moments',
-        'Check Google Play Services status'
+        i18n.t('voice.serverError'),
+        i18n.t('voice.tryAgainLater'),
+        i18n.t('voice.checkPlayServices')
       ];
       canRetry = true;
       break;
       
     case 3: // ERROR_AUDIO
       suggestions = [
-        'Check microphone permissions',
-        'Ensure microphone is not blocked by other apps',
-        'Check device microphone hardware'
+        i18n.t('voice.checkMicPermissions'),
+        i18n.t('voice.micNotBlocked'),
+        i18n.t('voice.checkMicHardware')
       ];
       canRetry = true;
       break;
       
     case 6: // ERROR_NO_MATCH
       suggestions = [
-        'Speak more clearly',
-        'Try speaking louder',
-        'Reduce background noise',
-        'Speak closer to the microphone'
+        i18n.t('voice.speakClearly'),
+        i18n.t('voice.speakLouder'),
+        i18n.t('voice.reduceNoise'),
+        i18n.t('voice.speakCloser')
       ];
       canRetry = true;
       break;
       
     case 7: // ERROR_RECOGNIZER_BUSY
       suggestions = [
-        'Speech recognizer is busy',
-        'Wait a moment and try again',
-        'Close other apps using voice recognition'
+        i18n.t('voice.recognizerBusy'),
+        i18n.t('voice.tryAgainLater'),
+        i18n.t('voice.closeOtherApps')
       ];
       canRetry = true;
       break;

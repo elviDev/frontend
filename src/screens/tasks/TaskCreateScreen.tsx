@@ -32,6 +32,7 @@ import { channelService } from '../../services/api/channelService';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../contexts/ToastContext';
 import { CreateTaskData } from '../../types/task.types';
+import { useTranslation } from 'react-i18next';
 
 type TaskCreateScreenProps = NativeStackScreenProps<
   MainStackParamList,
@@ -94,6 +95,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
   navigation,
   route,
 }) => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { showSuccess, showError, showWarning } = useToast();
   

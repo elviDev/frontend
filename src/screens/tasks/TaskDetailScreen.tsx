@@ -20,6 +20,7 @@ import { userService } from '../../services/api/userService';
 import { API_BASE_URL } from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import { useUI } from '../../components/common/UIProvider';
+import { useAppTranslation } from '../../hooks/useAppTranslation';
 
 // Import existing components
 import { TaskDetailHeader } from '../../components/task/TaskDetailHeader';
@@ -48,6 +49,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
   navigation,
   route,
 }) => {
+  const { t, tasks, common, errors } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { taskId } = route.params;
 

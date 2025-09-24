@@ -32,6 +32,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { announcementService, CreateAnnouncementData } from '../../services/api/announcementService';
 import { useUI } from '../../components/common/UIProvider';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '../../components/common/LanguageSwitcher';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -40,6 +42,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
   navigation,
   route,
 }) => {
+  const { t } = useTranslation();
   const { userId } = route?.params || {};
   const insets = useSafeAreaInsets();
   const { user: currentUser, logout } = useAuth();
@@ -401,15 +404,15 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
   const handleLogout = () => {
     showConfirm(
-      'Logout',
-      'Are you sure you want to logout?',
+      t('auth.logout'),
+      t('auth.logoutConfirm'),
       () => {
         logout();
       },
       undefined,
       {
-        confirmText: 'Logout',
-        cancelText: 'Cancel',
+        confirmText: t('auth.logout'),
+        cancelText: t('auth.cancel'),
         destructive: true,
       }
     );
@@ -788,6 +791,11 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 </TouchableOpacity>
               )}
 
+              {/* Language Settings */}
+              <View className="bg-white rounded-2xl p-4 shadow-sm">
+                <LanguageSwitcher />
+              </View>
+
               {/* Logout */}
               <TouchableOpacity
                 onPress={handleLogout}
@@ -797,8 +805,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="log-out-outline" size={20} color="#6B7280" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-gray-900 font-semibold">Logout</Text>
-                  <Text className="text-gray-500 text-sm">Sign out of your account</Text>
+                  <Text className="text-gray-900 font-semibold">{t('auth.logout')}</Text>
+                  <Text className="text-gray-500 text-sm">{t('auth.logoutDescription')}</Text>
                 </View>
                 <IonIcon name="chevron-forward" size={20} color="#9CA3AF" />
               </TouchableOpacity>

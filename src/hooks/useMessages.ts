@@ -1093,7 +1093,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     if (typingDebounceRef.current) {
       clearTimeout(typingDebounceRef.current);
     }
-    
+
     // Auto-stop typing after 3 seconds of inactivity
     typingDebounceRef.current = setTimeout(() => {
       webSocketService.stopTyping(channelId, 'channel', threadRootId);
@@ -1108,12 +1108,12 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-    
+
     if (typingDebounceRef.current) {
       clearTimeout(typingDebounceRef.current);
       typingDebounceRef.current = null;
     }
-    
+
     lastTypingTimestampRef.current = 0;
   }, [channelId, threadRootId]);
 
@@ -1136,9 +1136,9 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         console.log('🔄 Continuing with limited real-time functionality');
       }
     };
-    
+
     connectWebSocket();
-    
+
     // Join channel for real-time updates
     webSocketService.joinChannel(channelId);
 
@@ -1324,15 +1324,15 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     
     // Enhanced connection state handling
     const handleConnectionStateChange = () => {
-      const connectionState = webSocketService.getConnectionState;
+      const connectionState = webSocketService.getConnectionState();
       console.log('📶 WebSocket connection state changed:', connectionState);
-      
+
       if (connectionState === 'connected') {
         setError(null); // Clear any connection errors
       } else if (connectionState === 'reconnecting') {
         setError('Reconnecting to server...');
       } else if (connectionState === 'disconnected') {
-        const reconnectionInfo = webSocketService.reconnectionInfo;
+        const reconnectionInfo = webSocketService.getReconnectionInfo();
         if (reconnectionInfo.attempts >= reconnectionInfo.maxAttempts) {
           setError('Connection lost. Please refresh the page to reconnect.');
         }
@@ -1542,9 +1542,9 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     updateThreadInfo,
     forceReconnect,
     // Connection state
-    connectionState: webSocketService.getConnectionState,
-    reconnectionInfo: webSocketService.reconnectionInfo,
-    isConnected: webSocketService.isConnected,
+    connectionState: webSocketService.getConnectionState(),
+    reconnectionInfo: webSocketService.getReconnectionInfo(),
+    isConnected: webSocketService.isConnected(),
     // Thread state getters
     threadCache,
     threadInfoCache,

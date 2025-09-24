@@ -16,6 +16,7 @@ import { ChannelCard, ConfirmationModal, ActionSheet } from '../../components/co
 import { CreateChannelModal } from '../../components/channel/CreateChannelModal';
 import { MemberSelectorModal } from '../../components/channel/MemberSelectorModal';
 import { CategoryFilterModal } from '../../components/channel/CategoryFilterModal';
+import { useAppTranslation } from '../../hooks/useAppTranslation';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -86,6 +87,7 @@ const mapApiChannelToDisplayChannel = (apiChannel: ApiChannel, stats?: {
 export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   navigation,
 }) => {
+  const { t, navigation: nav, common, channels: channelTr } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
@@ -316,10 +318,10 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     let isValid = true;
 
     if (!formData.name.trim()) {
-      errors.name = 'Channel name is required';
+      errors.name = channelTr.channelNameRequired();
       isValid = false;
     } else if (formData.name.trim().length < 2) {
-      errors.name = 'Channel name must be at least 2 characters';
+      errors.name = channelTr.channelNameTooShort();
       isValid = false;
     }
 
@@ -381,11 +383,11 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       if (isEditMode && editingChannelId) {
         // Edit existing channel
         await channelService.updateChannel(editingChannelId, channelData);
-        showSuccess(`Channel "${formData.name}" updated successfully!`);
+        showSuccess(`${channelTr.channelUpdated()}: "${formData.name}"`);
       } else {
         // Create new channel
         await channelService.createChannel(channelData);
-        showSuccess(`Channel "${formData.name}" created successfully!`);
+        showSuccess(`${channelTr.channelCreated()}: "${formData.name}"`);
       }
       
       // Refresh channels list
@@ -635,7 +637,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
           entering={FadeInUp.delay(400).duration(500)}
           className="text-gray-900 text-3xl font-bold"
         >
-          Channels
+          {channelTr.title()}
         </Animated.Text>
         <Animated.View
           entering={FadeInUp.delay(500).duration(500)}
@@ -672,7 +674,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
               style={{ marginRight: 12 }}
             />
             <TextInput
-              placeholder="Search channels, tags, or descriptions..."
+              placeholder={channelTr.searchChannels()}
               value={searchQuery}
               onChangeText={setSearchQuery}
               onFocus={() => setIsSearchFocused(true)}
@@ -737,8 +739,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
           >
             <Text className="text-gray-600 text-sm">
               {filteredChannels.length > 0
-                ? `${filteredChannels.length} channel${filteredChannels.length === 1 ? '' : 's'} found`
-                : 'No channels found'}
+                ? `${filteredChannels.length} ${channelTr.channelsFound(filteredChannels.length)}`
+                : t('channels.noChannelsFound')}
             </Text>
           </Animated.View>
         )}
