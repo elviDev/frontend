@@ -4,7 +4,7 @@ import { useToast } from '../contexts/ToastContext';
 import { RootState } from '../store/store';
 import type { Message, TypingUser, ThreadInfo } from '../types/message';
 import { messageService } from '../services/messageService';
-import messageWebSocketService from '../services/messageWebSocketService';
+import { webSocketService } from '../services/websocketService';
 
 interface SendMessageParams {
   content: string;
@@ -1087,7 +1087,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
     
     lastTypingTimestampRef.current = now;
-    messageWebSocketService.startTyping(channelId, threadRootId);
+    webSocketService.startTyping(channelId, 'channel', threadRootId);
     
     // Clear existing timeout
     if (typingDebounceRef.current) {
@@ -1096,12 +1096,12 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     
     // Auto-stop typing after 3 seconds of inactivity
     typingDebounceRef.current = setTimeout(() => {
-      messageWebSocketService.stopTyping(channelId, threadRootId);
+      webSocketService.stopTyping(channelId, 'channel', threadRootId);
     }, 3000);
   }, [channelId, threadRootId]);
 
   const stopTyping = useCallback(() => {
-    messageWebSocketService.stopTyping(channelId, threadRootId);
+    webSocketService.stopTyping(channelId, 'channel', threadRootId);
     
     // Clear all typing-related timeouts
     if (typingTimeoutRef.current) {
@@ -1122,7 +1122,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     // Connect to WebSocket with enhanced error handling
     const connectWebSocket = async () => {
       try {
-        await messageWebSocketService.connect();
+        await webSocketService.connect();
         console.log('✅ WebSocket connected for channel:', channelId);
       } catch (error) {
         console.error('❌ Failed to connect WebSocket:', error);
@@ -1133,7 +1133,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     connectWebSocket();
     
     // Join channel for real-time updates
-    messageWebSocketService.joinChannel(channelId);
+    webSocketService.joinChannel(channelId);
 
     // Message events
     const handleMessageSent = (data: any) => {
@@ -1306,18 +1306,18 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     };
 
     // Register event listeners
-    messageWebSocketService.on('message_sent', handleMessageSent);
-    messageWebSocketService.on('message_updated', handleMessageUpdated);
-    messageWebSocketService.on('message_deleted', handleMessageDeleted);
-    messageWebSocketService.on('thread_created', handleThreadCreated);
-    messageWebSocketService.on('thread_reply', handleThreadReply);
-    messageWebSocketService.on('reaction_toggled', handleReactionToggled);
-    messageWebSocketService.on('reactions_cleared', handleReactionsCleared);
-    messageWebSocketService.on('typing_indicator', handleTypingIndicator);
+    webSocketService.on('message_sent', handleMessageSent);
+    webSocketService.on('message_updated', handleMessageUpdated);
+    webSocketService.on('message_deleted', handleMessageDeleted);
+    webSocketService.on('thread_created', handleThreadCreated);
+    webSocketService.on('thread_reply', handleThreadReply);
+    webSocketService.on('reaction_toggled', handleReactionToggled);
+    webSocketService.on('reactions_cleared', handleReactionsCleared);
+    webSocketService.on('typing_indicator', handleTypingIndicator);
     
     // Enhanced connection state handling
     const handleConnectionStateChange = () => {
-      const connectionState = messageWebSocketService.getConnectionState;
+      const connectionState = webSocketService.getConnectionState;
       console.log('📶 WebSocket connection state changed:', connectionState);
       
       if (connectionState === 'connected') {
@@ -1325,7 +1325,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       } else if (connectionState === 'reconnecting') {
         setError('Reconnecting to server...');
       } else if (connectionState === 'disconnected') {
-        const reconnectionInfo = messageWebSocketService.reconnectionInfo;
+        const reconnectionInfo = webSocketService.reconnectionInfo;
         if (reconnectionInfo.attempts >= reconnectionInfo.maxAttempts) {
           setError('Connection lost. Please refresh the page to reconnect.');
         }
@@ -1397,28 +1397,28 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     };
     
     // Register enhanced event listeners
-    messageWebSocketService.on('connect', handleConnectionStateChange);
-    messageWebSocketService.on('disconnect', handleConnectionStateChange);
-    messageWebSocketService.on('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
-    messageWebSocketService.on('sync_response', handleSyncResponse);
+    webSocketService.on('connect', handleConnectionStateChange);
+    webSocketService.on('disconnect', handleConnectionStateChange);
+    webSocketService.on('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+    webSocketService.on('sync_response', handleSyncResponse);
 
     return () => {
       // Cleanup event listeners
-      messageWebSocketService.off('message_sent', handleMessageSent);
-      messageWebSocketService.off('message_updated', handleMessageUpdated);
-      messageWebSocketService.off('message_deleted', handleMessageDeleted);
-      messageWebSocketService.off('thread_created', handleThreadCreated);
-      messageWebSocketService.off('thread_reply', handleThreadReply);
-      messageWebSocketService.off('reaction_toggled', handleReactionToggled);
-      messageWebSocketService.off('reactions_cleared', handleReactionsCleared);
-      messageWebSocketService.off('typing_indicator', handleTypingIndicator);
-      messageWebSocketService.off('connect', handleConnectionStateChange);
-      messageWebSocketService.off('disconnect', handleConnectionStateChange);
-      messageWebSocketService.off('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
-      messageWebSocketService.off('sync_response', handleSyncResponse);
+      webSocketService.off('message_sent', handleMessageSent);
+      webSocketService.off('message_updated', handleMessageUpdated);
+      webSocketService.off('message_deleted', handleMessageDeleted);
+      webSocketService.off('thread_created', handleThreadCreated);
+      webSocketService.off('thread_reply', handleThreadReply);
+      webSocketService.off('reaction_toggled', handleReactionToggled);
+      webSocketService.off('reactions_cleared', handleReactionsCleared);
+      webSocketService.off('typing_indicator', handleTypingIndicator);
+      webSocketService.off('connect', handleConnectionStateChange);
+      webSocketService.off('disconnect', handleConnectionStateChange);
+      webSocketService.off('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+      webSocketService.off('sync_response', handleSyncResponse);
       
       // Leave channel
-      messageWebSocketService.leaveChannel(channelId);
+      webSocketService.leaveChannel(channelId);
     };
   }, [channelId, threadRootId]); // Removed transformApiMessage - it's now stable
 
@@ -1507,7 +1507,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
   const forceReconnect = useCallback(async () => {
     try {
       setError('Reconnecting...');
-      await messageWebSocketService.forceReconnect();
+      await webSocketService.forceReconnect();
       setError(null);
       console.log('✅ Manual reconnection successful');
     } catch (error) {
@@ -1535,9 +1535,9 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     updateThreadInfo,
     forceReconnect,
     // Connection state
-    connectionState: messageWebSocketService.getConnectionState,
-    reconnectionInfo: messageWebSocketService.reconnectionInfo,
-    isConnected: messageWebSocketService.isConnected,
+    connectionState: webSocketService.getConnectionState,
+    reconnectionInfo: webSocketService.reconnectionInfo,
+    isConnected: webSocketService.isConnected,
     // Thread state getters
     threadCache,
     threadInfoCache,

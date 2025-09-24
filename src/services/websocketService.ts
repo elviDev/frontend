@@ -17,13 +17,30 @@ export type WebSocketEventType =
   | 'task_assigned'
   | 'task_status_changed'
   | 'comment_added'
+  | 'comment_created'
+  | 'comment_updated'
+  | 'comment_deleted'
   | 'user_typing'
   | 'presence_update'
   | 'message_sent'
   | 'message_updated'
   | 'message_deleted'
   | 'message_reaction_added'
-  | 'message_reaction_removed';
+  | 'message_reaction_removed'
+  | 'thread_created'
+  | 'thread_reply'
+  | 'thread_deleted'
+  | 'reaction_toggled'
+  | 'reactions_cleared'
+  | 'typing_indicator'
+  | 'user_joined_channel'
+  | 'user_left_channel'
+  | 'chat_message'
+  | 'task_comment'
+  | 'task_comment_updated'
+  | 'task_comment_deleted'
+  | 'sync_requested'
+  | 'sync_response';
 
 export type TaskActionType = 
   | 'create' 
@@ -34,7 +51,10 @@ export type TaskActionType =
   | 'complete' 
   | 'status_change'
   | 'priority_change'
-  | 'comment';
+  | 'comment'
+  | 'comment_created'
+  | 'comment_updated'
+  | 'comment_deleted';
 
 export interface TaskUpdateEvent {
   type: WebSocketEventType;
@@ -66,11 +86,13 @@ export interface NotificationEvent {
 }
 
 export interface TypingEvent {
-  taskId: string;
+  taskId?: string;
+  channelId?: string;
   userId: string;
   userName: string;
   isTyping: boolean;
   timestamp: string;
+  threadRootId?: string;
 }
 
 export interface MessageEvent {
@@ -92,6 +114,75 @@ export interface MessageEvent {
     reply_to?: string;
     mentions?: string[];
   };
+  userId: string;
+  userName: string;
+  timestamp: string;
+  isThreadReply?: boolean;
+  threadRootId?: string;
+}
+
+export interface ThreadEvent {
+  type: 'thread_created' | 'thread_reply' | 'thread_deleted';
+  threadRootId: string;
+  channelId: string;
+  createdBy?: string;
+  replyId?: string;
+  reply?: any;
+  message?: any;
+}
+
+export interface ReactionEvent {
+  messageId: string;
+  emoji: string;
+  action: 'added' | 'removed';
+  currentReactions: Array<{
+    emoji: string;
+    count: number;
+    users: Array<{
+      id: string;
+      name: string;
+      avatar_url?: string;
+    }>;
+  }>;
+}
+
+export interface ChannelEvent {
+  channelId: string;
+  userId: string;
+  user?: any;
+}
+
+export interface CommentEvent {
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted';
+  commentId: string;
+  taskId: string;
+  channelId?: string;
+  comment?: {
+    id: string;
+    content: string;
+    author: {
+      id: string;
+      name: string;
+      email: string;
+      avatar_url?: string;
+    };
+    created_at: string;
+    updated_at: string;
+    is_edited?: boolean;
+    attachments?: any[];
+  };
+  userId: string;
+  userName: string;
+  timestamp: string;
+}
+
+export interface ChatMessageEvent {
+  type: 'chat_message';
+  messageType: 'task_comment' | 'task_comment_updated' | 'task_comment_deleted';
+  taskId: string;
+  channelId: string;
+  commentId: string;
+  message?: string;
   userId: string;
   userName: string;
   timestamp: string;
@@ -153,6 +244,18 @@ class WebSocketService {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private lastHeartbeat: number = 0;
   private config: WebSocketConnectionConfig;
+  
+  // Enhanced connection management from messageWebSocketService
+  private heartbeatTimeoutMs = 15000; // 15 seconds timeout
+  private connectionState: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
+  private reconnectTimeoutId: NodeJS.Timeout | null = null;
+  private pendingOperations: Array<() => void> = [];
+  private syncInterval: NodeJS.Timeout | null = null;
+  private lastSyncTime = 0;
+  
+  // Channel and room management
+  private joinedChannels = new Set<string>();
+  private joinedTasks = new Set<string>();
 
   constructor(config?: Partial<WebSocketConnectionConfig>) {
     // For Android emulator, use 10.0.2.2, for iOS simulator/web use localhost
@@ -178,19 +281,54 @@ class WebSocketService {
   /**
    * Connect to WebSocket server
    */
-  connect(): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      if (this.socket?.connected || this.isConnecting) {
-        resolve();
-        return;
+  async connect(): Promise<void> {
+    // Return existing connection if already connected
+    if (this.socket?.connected && this.connectionState === 'connected') {
+      console.log('📡 WebSocket: Already connected');
+      return;
+    }
+
+    // Return existing connection promise if already connecting
+    if ((this.isConnecting || this.connectionState === 'connecting') && this.connectionPromise) {
+      console.log('📡 WebSocket: Connection already in progress, waiting...');
+      return this.connectionPromise;
+    }
+
+    this.isConnecting = true;
+    this.connectionState = 'connecting';
+    
+    this.connectionPromise = this._doConnect();
+    
+    try {
+      await this.connectionPromise;
+      this.connectionState = 'connected';
+      this.startHeartbeat();
+      this.startSyncInterval();
+      this.executePendingOperations();
+    } catch (error) {
+      this.connectionState = 'disconnected';
+      throw error;
+    } finally {
+      this.isConnecting = false;
+      this.connectionPromise = null;
+    }
+  }
+
+  private async _doConnect(): Promise<void> {
+    try {
+      // Disconnect existing socket if any
+      if (this.socket) {
+        this.socket.disconnect();
+        this.socket = null;
       }
 
-      this.isConnecting = true;
-      
-      const serverUrl = this.config.url;
-      
-      // Get token for initial connection
       const token = await tokenManager.getCurrentToken();
+      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const serverUrl = this.config.url;
       
       console.log('🔌 WebSocket: Connecting with token in auth:', {
         serverUrl,
@@ -199,168 +337,369 @@ class WebSocketService {
       });
       
       this.socket = io(serverUrl, {
-        transports: ['websocket', 'polling'],
-        timeout: 20000,
+        auth: { token },
+        transports: this.config.transports,
+        timeout: this.config.timeout,
         reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
         reconnectionAttempts: this.maxReconnectAttempts,
-        // Include token in connection auth for backend authentication middleware
-        auth: {
-          token: token
-        }
+        reconnectionDelay: this.config.reconnectionDelay,
+        forceNew: true,
       });
 
-      // Listen for token changes to automatically re-authenticate
-      if (!this.tokenUnsubscribe) {
-        this.tokenUnsubscribe = tokenManager.onTokenChange((newToken) => {
-          console.log('🔄 WebSocket: Token changed, reconnecting with new token...', !!newToken);
-          if (newToken) {
-            // Reconnect with new token (disconnect and reconnect with new auth)
-            if (this.socket?.connected) {
-              this.disconnect();
-              // Reconnect after a short delay
-              setTimeout(() => this.connect(), 1000);
-            }
-          } else {
-            // Token was cleared, disconnect
-            this.disconnect();
+      this.setupEventHandlers();
+      
+      return new Promise((resolve, reject) => {
+        const connectTimeout = setTimeout(() => {
+          reject(new Error('WebSocket connection timeout'));
+        }, this.config.timeout);
+
+        this.socket!.on('connect', () => {
+          clearTimeout(connectTimeout);
+          console.log('✅ WebSocket: Connected to server');
+          this.reconnectAttempts = 0;
+          this.connectionState = 'connected';
+          
+          // Clear any pending reconnection timeout
+          if (this.reconnectTimeoutId) {
+            clearTimeout(this.reconnectTimeoutId);
+            this.reconnectTimeoutId = null;
           }
+          
+          // Rejoin previously joined channels and tasks
+          this.rejoinRooms();
+          
+          // Request sync from server for missed events
+          this.requestSync();
+          
+          resolve();
         });
+
+        this.socket!.on('connect_error', (error) => {
+          clearTimeout(connectTimeout);
+          console.error('❌ WebSocket: Connection error:', error);
+          reject(error);
+        });
+      });
+    } catch (error) {
+      console.error('❌ WebSocket: Failed to connect:', error);
+      throw error;
+    }
+  }
+
+  private setupEventHandlers(): void {
+    if (!this.socket) return;
+
+    // Listen for token changes to automatically re-authenticate
+    if (!this.tokenUnsubscribe) {
+      this.tokenUnsubscribe = tokenManager.onTokenChange((newToken) => {
+        console.log('🔄 WebSocket: Token changed, reconnecting with new token...', !!newToken);
+        if (newToken) {
+          if (this.socket?.connected) {
+            this.disconnect();
+            setTimeout(() => this.connect(), 1000);
+          }
+        } else {
+          this.disconnect();
+        }
+      });
+    }
+
+    // Connection events
+    this.socket.on('connect', () => {
+      this.emit('connect');
+    });
+
+    this.socket.on('disconnect', (reason) => {
+      console.log('🔌 WebSocket: Disconnected:', reason);
+      this.connectionState = 'disconnected';
+      this.stopHeartbeat();
+      this.stopSyncInterval();
+      this.emit('disconnect', reason);
+      
+      // Handle different disconnect reasons
+      if (reason === 'io server disconnect') {
+        console.log('🔄 Server initiated disconnect, attempting immediate reconnection');
+        this.handleReconnection();
+      } else if (reason === 'ping timeout' || reason === 'transport close') {
+        console.log('🔄 Connection lost, attempting reconnection');
+        this.handleReconnection();
+      } else if (reason !== 'io client disconnect') {
+        console.log('🔄 Unexpected disconnect, attempting reconnection');
+        this.handleReconnection();
       }
+    });
 
-      // Connection events
-      this.socket.on('connect', () => {
-        console.log('✅ WebSocket connected with authentication');
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        this.startHeartbeat();
-        // Authentication happens automatically during connection via auth parameter
-        resolve();
-      });
+    this.socket.on('connect_error', (error) => {
+      console.error('❌ WebSocket: Error:', error);
+      this.emit('error', error);
+    });
 
-      this.socket.on('disconnect', (reason) => {
-        console.log('WebSocket disconnected:', reason);
-        this.isConnecting = false;
-        this.stopHeartbeat();
-        
-        if (reason === 'io server disconnect') {
-          // Server initiated disconnect, don't reconnect
-          return;
-        }
-        
-        // Auto-reconnect for other reasons
-        this.scheduleReconnect();
-      });
+    // Task-specific events
+    this.socket.on('task_update', (event: TaskUpdateEvent) => {
+      this.handleTaskUpdate(event);
+    });
 
-      this.socket.on('connect_error', (error) => {
-        console.error('❌ WebSocket connection error:', error.message);
-        console.log('🔍 WebSocket connection details:', {
-          serverUrl,
-          hasToken: !!token,
-          tokenPreview: token ? `${token.substring(0, 20)}...` : 'none',
-          errorType: error.constructor.name,
-          errorMessage: error.message
-        });
-        this.isConnecting = false;
-        this.scheduleReconnect();
-        reject(error);
-      });
+    // Comment events from task operations
+    this.socket.on('comment_created', (event: CommentEvent) => {
+      console.log('💬 WebSocket: Comment created:', event);
+      this.handleCommentEvent(event);
+      this.emit('comment_created', event);
+    });
 
-      // Task-specific events
-      this.socket.on('task_update', (event: TaskUpdateEvent) => {
-        this.handleTaskUpdate(event);
-      });
+    this.socket.on('comment_updated', (event: CommentEvent) => {
+      console.log('✏️ WebSocket: Comment updated:', event);
+      this.handleCommentEvent(event);
+      this.emit('comment_updated', event);
+    });
 
-      // Notification events
-      this.socket.on('notification', (notification: NotificationEvent) => {
-        this.handleNotification(notification);
-      });
-      
-      // Typing events
-      this.socket.on('user_typing', (event: TypingEvent) => {
-        if (this.validateTypingEvent(event)) {
-          this.emitToListeners('user_typing', event);
-        }
-      });
-      
-      // Presence events
-      this.socket.on('presence_update', (event: PresenceEvent) => {
-        if (this.validatePresenceEvent(event)) {
-          this.emitToListeners('presence_update', event);
-        }
-      });
-      
-      // Message events
-      this.socket.on('message_sent', (event: MessageEvent) => {
-        if (this.validateMessageEvent(event)) {
-          this.emitToListeners('message_sent', event);
-        }
-      });
-      
-      this.socket.on('message_updated', (event: MessageEvent) => {
-        if (this.validateMessageEvent(event)) {
-          this.emitToListeners('message_updated', event);
-        }
-      });
-      
-      this.socket.on('message_deleted', (event: MessageEvent) => {
-        if (this.validateMessageEvent(event)) {
-          this.emitToListeners('message_deleted', event);
-        }
-      });
-      
-      // Message reaction events
-      this.socket.on('message_reaction_added', (event: MessageReactionEvent) => {
-        if (this.validateMessageReactionEvent(event)) {
-          this.emitToListeners('message_reaction_added', event);
-        }
-      });
-      
-      this.socket.on('message_reaction_removed', (event: MessageReactionEvent) => {
-        if (this.validateMessageReactionEvent(event)) {
-          this.emitToListeners('message_reaction_removed', event);
-        }
-      });
-      
-      // Channel typing events
-      this.socket.on('channel_typing_start', (event: ChannelTypingEvent) => {
-        if (this.validateChannelTypingEvent(event)) {
-          this.emitToListeners('channel_typing_start', event);
-        }
-      });
-      
-      this.socket.on('channel_typing_stop', (event: ChannelTypingEvent) => {
-        if (this.validateChannelTypingEvent(event)) {
-          this.emitToListeners('channel_typing_stop', event);
-        }
-      });
+    this.socket.on('comment_deleted', (event: CommentEvent) => {
+      console.log('🗑️ WebSocket: Comment deleted:', event);
+      this.handleCommentEvent(event);
+      this.emit('comment_deleted', event);
+    });
 
-      // Generic event handler for custom listeners
-      this.socket.onAny((eventName: string, ...args: any[]) => {
-        this.emitToListeners(eventName, args.length === 1 ? args[0] : args);
-      });
+    // Chat message events for task comments
+    this.socket.on('chat_message', (event: ChatMessageEvent) => {
+      console.log('📩 WebSocket: Chat message (task comment):', event);
+      this.handleChatMessageEvent(event);
+      this.emit('chat_message', event);
+    });
+
+    // Notification events
+    this.socket.on('notification', (notification: NotificationEvent) => {
+      this.handleNotification(notification);
+    });
+    
+    // Message events - unified from messageWebSocketService
+    this.socket.on('message_sent', (data) => {
+      console.log('📨 WebSocket: Message sent:', data);
+      this.emit('message_sent', data);
+    });
+
+    this.socket.on('message_updated', (data) => {
+      console.log('✏️ WebSocket: Message updated:', data);
+      this.emit('message_updated', data);
+    });
+
+    this.socket.on('message_deleted', (data) => {
+      console.log('🗑️ WebSocket: Message deleted:', data);
+      this.emit('message_deleted', data);
+    });
+
+    // Thread events
+    this.socket.on('thread_created', (data) => {
+      console.log('🧵 WebSocket: Thread created:', data);
+      this.emit('thread_created', data);
+    });
+
+    this.socket.on('thread_reply', (data) => {
+      console.log('💬 WebSocket: Thread reply:', data);
+      this.emit('thread_reply', data);
+    });
+
+    this.socket.on('thread_deleted', (data) => {
+      console.log('🗑️ WebSocket: Thread deleted:', data);
+      this.emit('thread_deleted', data);
+    });
+
+    // Reaction events
+    this.socket.on('reaction_toggled', (data) => {
+      console.log('😀 WebSocket: Reaction toggled:', data);
+      this.emit('reaction_toggled', data);
+    });
+
+    this.socket.on('reactions_cleared', (data) => {
+      console.log('🧹 WebSocket: Reactions cleared:', data);
+      this.emit('reactions_cleared', data);
+    });
+
+    // Channel events
+    this.socket.on('user_joined_channel', (data) => {
+      console.log('👋 WebSocket: User joined channel:', data);
+      this.emit('user_joined_channel', data);
+    });
+
+    this.socket.on('user_left_channel', (data) => {
+      console.log('👋 WebSocket: User left channel:', data);
+      this.emit('user_left_channel', data);
+    });
+    
+    // Typing events (unified for both tasks and channels)
+    this.socket.on('user_typing', (event: TypingEvent) => {
+      if (this.validateTypingEvent(event)) {
+        this.emitToListeners('user_typing', event);
+      }
+    });
+
+    this.socket.on('typing_indicator', (data) => {
+      this.emit('typing_indicator', data);
+    });
+    
+    // Presence events
+    this.socket.on('presence_update', (event: PresenceEvent) => {
+      if (this.validatePresenceEvent(event)) {
+        this.emitToListeners('presence_update', event);
+      }
+    });
+    
+    // Message reaction events
+    this.socket.on('message_reaction_added', (event: MessageReactionEvent) => {
+      if (this.validateMessageReactionEvent(event)) {
+        this.emitToListeners('message_reaction_added', event);
+      }
+    });
+    
+    this.socket.on('message_reaction_removed', (event: MessageReactionEvent) => {
+      if (this.validateMessageReactionEvent(event)) {
+        this.emitToListeners('message_reaction_removed', event);
+      }
+    });
+    
+    // Channel typing events
+    this.socket.on('channel_typing_start', (event: ChannelTypingEvent) => {
+      if (this.validateChannelTypingEvent(event)) {
+        this.emitToListeners('channel_typing_start', event);
+      }
+    });
+    
+    this.socket.on('channel_typing_stop', (event: ChannelTypingEvent) => {
+      if (this.validateChannelTypingEvent(event)) {
+        this.emitToListeners('channel_typing_stop', event);
+      }
+    });
+    
+    // Heartbeat/ping response
+    this.socket.on('pong', () => {
+      this.lastHeartbeat = Date.now();
+    });
+    
+    // Sync events
+    this.socket.on('sync_response', (data) => {
+      console.log('🔄 WebSocket: Received sync response:', data);
+      this.emit('sync_response', data);
+    });
+
+    // Generic event handler for custom listeners
+    this.socket.onAny((eventName: string, ...args: any[]) => {
+      this.emitToListeners(eventName, args.length === 1 ? args[0] : args);
     });
   }
 
-  // NOTE: Authentication now happens automatically during connection via the auth parameter
-  // No separate authenticate() method needed since backend middleware handles it
+  private rejoinRooms(): void {
+    // Rejoin previously joined channels
+    this.joinedChannels.forEach(channelId => {
+      if (this.socket?.connected) {
+        this.socket.emit('join_channel', { channelId });
+        console.log(`🔄 WebSocket: Rejoined channel: ${channelId}`);
+      }
+    });
 
-  /**
-   * Schedule reconnection attempt
-   */
-  private scheduleReconnect(): void {
+    // Rejoin previously joined tasks
+    this.joinedTasks.forEach(taskId => {
+      if (this.socket?.connected) {
+        this.socket.emit('join_task', { taskId });
+        console.log(`🔄 WebSocket: Rejoined task: ${taskId}`);
+      }
+    });
+  }
+
+  private async handleReconnection(): Promise<void> {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      console.error('❌ WebSocket: Max reconnection attempts reached');
+      this.connectionState = 'disconnected';
+      this.emit('max_reconnect_attempts_reached');
       return;
     }
 
+    if (this.connectionState === 'reconnecting' || this.connectionState === 'connecting') {
+      return;
+    }
+
+    this.connectionState = 'reconnecting';
     this.reconnectAttempts++;
     
-    setTimeout(() => {
-      console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-      this.connect().catch(console.error);
-    }, this.reconnectInterval * this.reconnectAttempts);
+    // Exponential backoff with jitter
+    const baseDelay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1);
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(baseDelay + jitter, 30000);
+    
+    console.log(`🔄 WebSocket: Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${Math.round(delay)}ms`);
+    
+    this.reconnectTimeoutId = setTimeout(async () => {
+      try {
+        await this.connect();
+        console.log('✅ WebSocket: Reconnection successful');
+      } catch (error) {
+        console.error('❌ WebSocket: Reconnection failed:', error);
+        
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.handleReconnection();
+        } else {
+          this.connectionState = 'disconnected';
+        }
+      }
+    }, delay);
+  }
+
+  private executePendingOperations(): void {
+    const operations = [...this.pendingOperations];
+    this.pendingOperations = [];
+    
+    operations.forEach(operation => {
+      try {
+        operation();
+      } catch (error) {
+        console.error('❌ WebSocket: Error executing pending operation:', error);
+      }
+    });
+  }
+  
+  private requestSync(): void {
+    if (this.socket?.connected && this.lastSyncTime > 0) {
+      const syncData = {
+        lastSyncTime: this.lastSyncTime,
+        channels: Array.from(this.joinedChannels),
+        tasks: Array.from(this.joinedTasks),
+      };
+      
+      console.log('🔄 WebSocket: Requesting sync for missed updates:', syncData);
+      this.socket.emit('request_sync', syncData);
+    }
+    
+    this.lastSyncTime = Date.now();
+  }
+  
+  private startSyncInterval(): void {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+    }
+    
+    this.syncInterval = setInterval(() => {
+      this.lastSyncTime = Date.now();
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+  
+  private stopSyncInterval(): void {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+      this.syncInterval = null;
+    }
+  }
+  
+  private queueOperation(operation: () => void): void {
+    if (this.socket?.connected) {
+      operation();
+    } else {
+      this.pendingOperations.push(operation);
+      console.log('📝 WebSocket: Queued operation for when connection is restored');
+    }
+  }
+
+  /**
+   * Schedule reconnection attempt (legacy method for backward compatibility)
+   */
+  private scheduleReconnect(): void {
+    this.handleReconnection();
   }
 
   /**
@@ -579,33 +918,41 @@ class WebSocketService {
   }
 
   /**
-   * Send typing indicator for task comments
+   * Send typing indicator (works for both tasks and channels)
    */
-  startTyping(taskId: string): void {
-    if (!taskId?.trim()) {
-      throw new Error('Task ID is required');
+  startTyping(roomId: string, roomType: 'task' | 'channel' = 'task', threadRootId?: string): void {
+    if (!roomId?.trim()) {
+      throw new Error('Room ID is required');
     }
     
-    if (this.socket?.connected) {
-      this.socket.emit('typing_start', { taskId, timestamp: new Date().toISOString() });
-    } else {
-      console.warn('Cannot start typing: WebSocket not connected');
-    }
+    this.queueOperation(() => {
+      if (this.socket?.connected) {
+        if (roomType === 'task') {
+          this.socket.emit('typing_start', { taskId: roomId, timestamp: new Date().toISOString() });
+        } else {
+          this.socket.emit('typing_start', { channelId: roomId, threadRootId, timestamp: new Date().toISOString() });
+        }
+      }
+    });
   }
 
   /**
    * Stop typing indicator
    */
-  stopTyping(taskId: string): void {
-    if (!taskId?.trim()) {
-      throw new Error('Task ID is required');
+  stopTyping(roomId: string, roomType: 'task' | 'channel' = 'task', threadRootId?: string): void {
+    if (!roomId?.trim()) {
+      throw new Error('Room ID is required');
     }
     
-    if (this.socket?.connected) {
-      this.socket.emit('typing_stop', { taskId, timestamp: new Date().toISOString() });
-    } else {
-      console.warn('Cannot stop typing: WebSocket not connected');
-    }
+    this.queueOperation(() => {
+      if (this.socket?.connected) {
+        if (roomType === 'task') {
+          this.socket.emit('typing_stop', { taskId: roomId, timestamp: new Date().toISOString() });
+        } else {
+          this.socket.emit('typing_stop', { channelId: roomId, threadRootId, timestamp: new Date().toISOString() });
+        }
+      }
+    });
   }
 
   /**
@@ -722,6 +1069,24 @@ class WebSocketService {
   }
 
   /**
+   * Get current connection state
+   */
+  getConnectionState(): 'connecting' | 'connected' | 'disconnected' | 'reconnecting' {
+    return this.connectionState;
+  }
+  
+  /**
+   * Get reconnection info
+   */
+  getReconnectionInfo(): { attempts: number; maxAttempts: number; isReconnecting: boolean } {
+    return {
+      attempts: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+      isReconnecting: this.connectionState === 'reconnecting',
+    };
+  }
+
+  /**
    * Force reconnection
    */
   reconnect(): Promise<void> {
@@ -729,20 +1094,32 @@ class WebSocketService {
       return Promise.reject(new Error('WebSocket service has been destroyed'));
     }
     
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket.connect();
-      return Promise.resolve();
-    } else {
-      return this.connect();
-    }
+    console.log('🔄 WebSocket: Force reconnecting...');
+    this.disconnect();
+    this.reconnectAttempts = 0;
+    return this.connect();
+  }
+
+  /**
+   * Force reconnection (alias for compatibility)
+   */
+  forceReconnect(): Promise<void> {
+    return this.reconnect();
   }
 
   /**
    * Disconnect WebSocket
    */
   disconnect(): void {
+    console.log('🔌 WebSocket: Disconnecting...');
+    
     this.stopHeartbeat();
+    this.stopSyncInterval();
+    
+    if (this.reconnectTimeoutId) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
+    }
     
     // Clean up token change listener
     if (this.tokenUnsubscribe) {
@@ -750,16 +1127,17 @@ class WebSocketService {
       this.tokenUnsubscribe = null;
     }
     
+    this.isConnecting = false;
+    this.connectionState = 'disconnected';
+    this.connectionPromise = null;
+    this.reconnectAttempts = 0;
+    this.pendingOperations = [];
+    
     if (this.socket) {
-      this.socket.disconnect();
       this.socket.removeAllListeners();
+      this.socket.disconnect();
       this.socket = null;
     }
-    
-    this.isConnecting = false;
-    this.reconnectAttempts = 0;
-    this.connectionPromise = null;
-    this.eventListeners.clear();
     
     this.emitToListeners('disconnected', { reason: 'manual_disconnect' });
   }
@@ -780,12 +1158,18 @@ class WebSocketService {
     this.lastHeartbeat = Date.now();
     
     this.heartbeatInterval = setInterval(() => {
-      const now = Date.now();
-      if (now - this.lastHeartbeat > 30000) { // 30 seconds timeout
-        console.warn('WebSocket heartbeat timeout, reconnecting...');
-        this.reconnect();
+      if (this.socket?.connected) {
+        const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
+        
+        if (timeSinceLastHeartbeat > 30000 + this.heartbeatTimeoutMs) {
+          console.warn('⚠️ WebSocket: Heartbeat timeout detected, attempting reconnection');
+          this.handleReconnection();
+          return;
+        }
+        
+        this.socket.emit('ping');
       }
-    }, 15000); // Check every 15 seconds
+    }, 30000); // Check every 30 seconds
   }
   
   /**
@@ -804,11 +1188,11 @@ class WebSocketService {
   private validateTypingEvent(event: any): event is TypingEvent {
     return (
       event &&
-      typeof event.taskId === 'string' &&
       typeof event.userId === 'string' &&
       typeof event.userName === 'string' &&
       typeof event.isTyping === 'boolean' &&
-      typeof event.timestamp === 'string'
+      typeof event.timestamp === 'string' &&
+      (event.taskId || event.channelId)
     );
   }
   
@@ -869,29 +1253,101 @@ class WebSocketService {
       typeof event.timestamp === 'string'
     );
   }
+
+  /**
+   * Handle comment events from task operations
+   */
+  private handleCommentEvent(event: CommentEvent): void {
+    if (!this.validateCommentEvent(event)) {
+      console.warn('Invalid comment event received:', event);
+      return;
+    }
+
+    // Additional processing can be added here
+    // For now, we just emit the event for listeners
+    console.log(`🔄 WebSocket: Processing comment event [${event.type}]:`, event);
+    
+    // The event has already been emitted in setupEventHandlers
+    // This method is for additional processing if needed
+  }
+
+  /**
+   * Handle chat message events (task comments)
+   */
+  private handleChatMessageEvent(event: ChatMessageEvent): void {
+    if (!this.validateChatMessageEvent(event)) {
+      console.warn('Invalid chat message event received:', event);
+      return;
+    }
+
+    // Additional processing for task comment messages
+    console.log(`🔄 WebSocket: Processing chat message event [${event.type}]:`, event);
+    
+    // The event has already been emitted in setupEventHandlers  
+    // This method is for additional processing if needed
+  }
+
+  /**
+   * Validate comment event
+   */
+  private validateCommentEvent(event: any): event is CommentEvent {
+    return (
+      event &&
+      typeof event.type === 'string' &&
+      ['comment_created', 'comment_updated', 'comment_deleted'].includes(event.type) &&
+      typeof event.taskId === 'string' &&
+      typeof event.commentId === 'string' &&
+      typeof event.userId === 'string' &&
+      typeof event.timestamp === 'string'
+    );
+  }
+
+  /**
+   * Validate chat message event
+   */
+  private validateChatMessageEvent(event: any): event is ChatMessageEvent {
+    return (
+      event &&
+      typeof event.type === 'string' &&
+      ['task_comment', 'task_comment_updated', 'task_comment_deleted'].includes(event.type) &&
+      typeof event.taskId === 'string' &&
+      typeof event.messageId === 'string' &&
+      typeof event.userId === 'string' &&
+      typeof event.timestamp === 'string'
+    );
+  }
 }
 
 // Create singleton instance
 export const webSocketService = new WebSocketService();
 
-// React Hook for WebSocket integration
+// React Hook for unified WebSocket integration
 export function useWebSocket() {
   const [isConnected, setIsConnected] = React.useState(false);
+  const [connectionState, setConnectionState] = React.useState<'connecting' | 'connected' | 'disconnected' | 'reconnecting'>('disconnected');
 
   React.useEffect(() => {
     // Initial connection state
     setIsConnected(webSocketService.isConnected());
+    setConnectionState(webSocketService.getConnectionState());
 
     // Listen for connection changes
-    const handleConnect = () => setIsConnected(true);
-    const handleDisconnect = () => setIsConnected(false);
+    const handleConnect = () => {
+      setIsConnected(true);
+      setConnectionState('connected');
+    };
+    
+    const handleDisconnect = () => {
+      setIsConnected(false);
+      setConnectionState('disconnected');
+    };
 
-    webSocketService.on('connect', handleConnect);
-    webSocketService.on('disconnect', handleDisconnect);
+    const unsubscribeConnect = webSocketService.on('connect', handleConnect);
+    const unsubscribeDisconnect = webSocketService.on('disconnect', handleDisconnect);
 
     return () => {
-      webSocketService.off('connect', handleConnect);
-      webSocketService.off('disconnect', handleDisconnect);
+      unsubscribeConnect();
+      unsubscribeDisconnect();
     };
   }, []);
 
@@ -899,23 +1355,40 @@ export function useWebSocket() {
     connect: () => webSocketService.connect(),
     disconnect: () => webSocketService.disconnect(),
     isConnected,
+    connectionState,
     on: <T = any>(eventName: string, listener: EventListener<T>) => webSocketService.on(eventName, listener),
     off: <T = any>(eventName: string, listener?: EventListener<T>) => webSocketService.off(eventName, listener),
     emit: (eventName: string, data: any) => webSocketService.emit(eventName, data),
     reconnect: () => webSocketService.reconnect(),
+    forceReconnect: () => webSocketService.forceReconnect(),
     getConnectionId: () => webSocketService.getConnectionId(),
+    
+    // Channel operations
     joinChannel: (channelId: string) => webSocketService.joinChannel(channelId),
     leaveChannel: (channelId: string) => webSocketService.leaveChannel(channelId),
+    
+    // Task operations
     joinTask: (taskId: string) => webSocketService.joinTask(taskId),
     leaveTask: (taskId: string) => webSocketService.leaveTask(taskId),
-    startTyping: (taskId: string) => webSocketService.startTyping(taskId),
-    stopTyping: (taskId: string) => webSocketService.stopTyping(taskId),
+    
+    // Unified typing indicators (works for both tasks and channels)
+    startTyping: (roomId: string, roomType?: 'task' | 'channel', threadRootId?: string) => 
+      webSocketService.startTyping(roomId, roomType, threadRootId),
+    stopTyping: (roomId: string, roomType?: 'task' | 'channel', threadRootId?: string) => 
+      webSocketService.stopTyping(roomId, roomType, threadRootId),
+    
+    // Legacy channel typing methods (for backward compatibility)
     startChannelTyping: (channelId: string) => webSocketService.startChannelTyping(channelId),
     stopChannelTyping: (channelId: string) => webSocketService.stopChannelTyping(channelId),
     startChannelReplyTyping: (channelId: string, parentMessageId: string, parentUserName: string) => 
       webSocketService.startChannelReplyTyping(channelId, parentMessageId, parentUserName),
     stopChannelReplyTyping: (channelId: string, parentMessageId: string) => 
       webSocketService.stopChannelReplyTyping(channelId, parentMessageId),
+    
+    // Presence
     updatePresence: (status: 'online' | 'away' | 'busy' | 'offline') => webSocketService.updatePresence(status),
+    
+    // Connection info
+    reconnectionInfo: webSocketService.getReconnectionInfo(),
   };
 }
