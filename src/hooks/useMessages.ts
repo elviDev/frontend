@@ -1124,9 +1124,16 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       try {
         await webSocketService.connect();
         console.log('✅ WebSocket connected for channel:', channelId);
-      } catch (error) {
+        setError(null); // Clear any previous errors
+      } catch (error: any) {
         console.error('❌ Failed to connect WebSocket:', error);
-        setError('Failed to establish real-time connection. Some features may not work properly.');
+        const errorMessage = error?.message?.includes('timeout') 
+          ? 'WebSocket connection timeout. Real-time features may be limited.'
+          : 'Failed to establish real-time connection. Some features may not work properly.';
+        setError(errorMessage);
+        
+        // Don't block the UI, continue with limited functionality
+        console.log('🔄 Continuing with limited real-time functionality');
       }
     };
     

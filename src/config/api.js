@@ -14,12 +14,11 @@ const API_CONFIG = {
   DEV_WS_URL: 'http://10.0.2.2:3000',
 };
 
-// Production environment
-// export const API_BASE_URL = API_CONFIG.BASE_URL;
-// export const WS_BASE_URL = API_CONFIG.WS_URL;
-
+// Production environment (fallback when dev server is not available)
+export const API_BASE_URL = API_CONFIG.BASE_URL;
+export const WS_BASE_URL = API_CONFIG.WS_URL;
 
 // Development environment
-export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
-export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
+// export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
+// export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
 export default API_CONFIG
