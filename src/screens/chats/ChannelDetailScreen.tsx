@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StatusBar,
@@ -18,6 +18,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { RootState } from '../../store/store';
 import type { Message } from '../../types/message';
 import type { MainStackParamList } from '../../navigation/MainNavigator';
+import { channelService } from '../../services/api/channelService';
 
 type ChannelDetailScreenProps = NativeStackScreenProps<MainStackParamList, 'ChannelDetailScreen'>;
 
@@ -100,8 +101,9 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         attachments,
       });
       setReplyingTo(null);
-    } catch (error) {
-      showError('Failed to send message');
+    } catch (err: any) {
+      console.error('Failed to send message:', err);
+      showError(err?.error?.message || err?.message || 'Failed to send message');
     }
   };
 
@@ -110,8 +112,9 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
       await editMessage(messageId, content);
       setEditingMessage(null);
       showSuccess('Message updated!');
-    } catch (error) {
-      showError('Failed to edit message');
+    } catch (err: any) {
+      console.error('Failed to edit message:', err);
+      showError(err?.error?.message || err?.message || 'Failed to edit message');
     }
   };
 
@@ -119,16 +122,18 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     try {
       await deleteMessage(messageId);
       showSuccess('Message deleted!');
-    } catch (error) {
-      showError('Failed to delete message');
+    } catch (err: any) {
+      console.error('Failed to delete message:', err);
+      showError(err?.error?.message || err?.message || 'Failed to delete message');
     }
   };
 
   const handleReaction = async (messageId: string, emoji: string) => {
     try {
       await addReaction(messageId, emoji);
-    } catch (error) {
-      showError('Failed to add reaction');
+    } catch (err: any) {
+      console.error('Failed to add reaction:', err);
+      showError(err?.error?.message || err?.message || 'Failed to add reaction');
     }
   };
 
@@ -156,6 +161,29 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
   const handleUserPress = (userId: string) => {
     showInfo(`Navigate to user: ${userId}`);
   };
+
+  // Note: Auto-join functionality temporarily disabled to avoid 500 errors
+  // The user is likely already a member if they can access this channel
+  // useEffect(() => {
+  //   const joinChannelOnOpen = async () => {
+  //     try {
+  //       if (!currentUser?.id) {
+  //         console.warn('⚠️ Cannot join channel: user not available');
+  //         return;
+  //       }
+  //       
+  //       console.log('🚪 Attempting to join channel:', channelId, 'for user:', currentUser.id);
+  //       const joined = await channelService.addChannelMember(channelId, currentUser.id, 'member');
+  //       if (joined) {
+  //         console.log('✅ Successfully joined channel:', channelId);
+  //       }
+  //     } catch (err: any) {
+  //       console.warn('⚠️ Failed to join channel (user may already be a member):', err?.message || err);
+  //     }
+  //   };
+  //   
+  //   joinChannelOnOpen();
+  // }, [channelId, currentUser?.id]);
 
 
   return (
@@ -240,6 +268,7 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
           }}
           channelMembers={enhancedMembers}
           isLoading={false}
+          autoFocus={true}
         />
       </View>
     </KeyboardAvoidingView>

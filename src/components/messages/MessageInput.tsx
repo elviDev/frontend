@@ -19,6 +19,7 @@ interface MessageInputProps {
   onAttachImage?: (image: any) => void;
   channelMembers?: any[];
   isLoading?: boolean;
+  autoFocus?: boolean;
 }
 
 export const MessageInput: React.FC<MessageInputProps> = ({
@@ -36,6 +37,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   onAttachImage,
   channelMembers = [],
   isLoading = false,
+  autoFocus = false,
 }) => {
   const insets = useSafeAreaInsets();
 
@@ -76,6 +78,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         onCancelReply={onCancelReply}
         channelMembers={channelMembers}
         isLoading={isLoading}
+        autoFocus={autoFocus}
       />
     </View>
   );

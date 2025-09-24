@@ -1138,24 +1138,46 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     // Message events
     const handleMessageSent = (data: any) => {
       if (data.channelId === channelId) {
-        if (threadRootId && data.threadRootId === threadRootId) {
-          // New reply in current thread
-          const newMessage = transformApiMessage(data.message);
-          setMessages(prev => deduplicateMessages([...prev, newMessage]));
-        } else if (!threadRootId && !data.isThreadReply) {
-          // New message in current channel (not a thread reply)
-          const newMessage = transformApiMessage(data.message);
-          setMessages(prev => deduplicateMessages([...prev, newMessage]));
+        // Validate that message data exists and is not null/undefined
+        if (!data.message) {
+          console.warn('🚨 Received message_sent event with null/undefined message data:', data);
+          return;
+        }
+        
+        try {
+          if (threadRootId && data.threadRootId === threadRootId) {
+            // New reply in current thread
+            const newMessage = transformApiMessage(data.message);
+            setMessages(prev => deduplicateMessages([...prev, newMessage]));
+          } else if (!threadRootId && !data.isThreadReply) {
+            // New message in current channel (not a thread reply)
+            const newMessage = transformApiMessage(data.message);
+            setMessages(prev => deduplicateMessages([...prev, newMessage]));
+          }
+        } catch (error) {
+          console.error('❌ Error processing message_sent event:', error);
+          console.log('📋 Message data that caused error:', data);
         }
       }
     };
 
     const handleMessageUpdated = (data: any) => {
       if (data.channelId === channelId) {
-        const updatedMessage = transformApiMessage(data.message);
-        setMessages(prev => prev.map(msg => 
-          msg.id === data.messageId ? updatedMessage : msg
-        ));
+        // Validate that message data exists and is not null/undefined
+        if (!data.message) {
+          console.warn('🚨 Received message_updated event with null/undefined message data:', data);
+          return;
+        }
+        
+        try {
+          const updatedMessage = transformApiMessage(data.message);
+          setMessages(prev => prev.map(msg => 
+            msg.id === data.messageId ? updatedMessage : msg
+          ));
+        } catch (error) {
+          console.error('❌ Error processing message_updated event:', error);
+          console.log('📋 Message data that caused error:', data);
+        }
       }
     };
 
@@ -1194,20 +1216,31 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       if (data.channelId === channelId) {
         const replyMessage = data.reply || data.message;
         
-        if (threadRootId && data.threadRootId === threadRootId) {
-          // Add reply to current thread view
-          const newMessage = transformApiMessage(replyMessage);
-          setMessages(prev => deduplicateMessages([newMessage, ...prev]));
-        } else if (!threadRootId) {
-          // Update thread info in channel view
-          updateThreadInfo(data.threadRootId, replyMessage);
+        // Validate that reply message data exists and is not null/undefined
+        if (!replyMessage) {
+          console.warn('🚨 Received thread_reply event with null/undefined reply data:', data);
+          return;
         }
         
-        console.log('💬 Thread reply received:', {
-          threadRootId: data.threadRootId,
-          currentThread: threadRootId,
-          isCurrentThread: threadRootId === data.threadRootId
-        });
+        try {
+          if (threadRootId && data.threadRootId === threadRootId) {
+            // Add reply to current thread view
+            const newMessage = transformApiMessage(replyMessage);
+            setMessages(prev => deduplicateMessages([newMessage, ...prev]));
+          } else if (!threadRootId) {
+            // Update thread info in channel view
+            updateThreadInfo(data.threadRootId, replyMessage);
+          }
+          
+          console.log('💬 Thread reply received:', {
+            threadRootId: data.threadRootId,
+            currentThread: threadRootId,
+            isCurrentThread: threadRootId === data.threadRootId
+          });
+        } catch (error) {
+          console.error('❌ Error processing thread_reply event:', error);
+          console.log('📋 Reply data that caused error:', data);
+        }
       }
     };
 
@@ -1306,38 +1339,60 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     const handleSyncResponse = (data: { messages: any[]; reactions: any[]; threads: any[] }) => {
       console.log('🔄 Processing sync response:', data);
       
-      if (data.messages && data.messages.length > 0) {
-        const syncedMessages = data.messages
-          .filter(msg => {
-            // Only process messages for current channel/thread
-            if (threadRootId) {
-              return msg.thread_root_id === threadRootId;
-            } else {
-              return msg.channel_id === channelId && !msg.thread_root_id;
-            }
-          })
-          .map(transformApiMessage);
+      try {
+        if (data.messages && data.messages.length > 0) {
+          const syncedMessages = data.messages
+            .filter(msg => {
+              // Skip null/undefined messages
+              if (!msg) {
+                console.warn('🚨 Received null/undefined message in sync response');
+                return false;
+              }
+              
+              // Only process messages for current channel/thread
+              if (threadRootId) {
+                return msg.thread_root_id === threadRootId;
+              } else {
+                return msg.channel_id === channelId && !msg.thread_root_id;
+              }
+            })
+            .map(msg => {
+              try {
+                return transformApiMessage(msg);
+              } catch (error) {
+                console.error('❌ Error transforming synced message:', error);
+                console.log('📋 Message that caused error:', msg);
+                return null;
+              }
+            })
+            .filter(msg => msg !== null); // Remove any failed transformations
+          
+          if (syncedMessages.length > 0) {
+            console.log('✅ Synced', syncedMessages.length, 'messages');
+            updateMessages(prev => {
+              const combined = [...syncedMessages, ...prev];
+              return deduplicateMessages(combined);
+            });
+          }
+        }
         
-        if (syncedMessages.length > 0) {
-          console.log('✅ Synced', syncedMessages.length, 'messages');
-          updateMessages(prev => {
-            const combined = [...syncedMessages, ...prev];
-            return deduplicateMessages(combined);
+        // Handle synced reactions and threads if needed
+        if (data.reactions) {
+          console.log('🔄 Synced reactions:', data.reactions.length);
+          // Update reactions in existing messages
+          data.reactions.forEach(reactionUpdate => {
+            if (reactionUpdate && reactionUpdate.message_id) {
+              updateMessages(prev => prev.map(msg => 
+                msg.id === reactionUpdate.message_id 
+                  ? { ...msg, reactions: reactionUpdate.reactions || [] }
+                  : msg
+              ));
+            }
           });
         }
-      }
-      
-      // Handle synced reactions and threads if needed
-      if (data.reactions) {
-        console.log('🔄 Synced reactions:', data.reactions.length);
-        // Update reactions in existing messages
-        data.reactions.forEach(reactionUpdate => {
-          updateMessages(prev => prev.map(msg => 
-            msg.id === reactionUpdate.message_id 
-              ? { ...msg, reactions: reactionUpdate.reactions }
-              : msg
-          ));
-        });
+      } catch (error) {
+        console.error('❌ Error processing sync response:', error);
+        console.log('📋 Sync data that caused error:', data);
       }
     };
     

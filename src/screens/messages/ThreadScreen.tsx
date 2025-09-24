@@ -304,6 +304,7 @@ export const ThreadScreen: React.FC<ThreadScreenProps> = ({
           onStartTyping={startTyping}
           onStopTyping={stopTyping}
           onCancelEdit={() => setEditingMessage(null)}
+          autoFocus={true}
         />
       </View>
     </KeyboardAvoidingView>

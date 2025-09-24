@@ -106,8 +106,8 @@ class MessageWebSocketService {
   // Enhanced state management
   private lastHeartbeat = 0;
   private heartbeatInterval: NodeJS.Timeout | null = null;
-  private heartbeatIntervalMs = 30000; // 30 seconds
-  private heartbeatTimeoutMs = 10000; // 10 seconds timeout
+  private heartbeatIntervalMs = 60000; // 60 seconds (increased from 30)
+  private heartbeatTimeoutMs = 15000; // 15 seconds timeout (increased from 10)
   private connectionState: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
   private reconnectTimeoutId: NodeJS.Timeout | null = null;
   private pendingOperations: Array<() => void> = [];

@@ -75,6 +75,7 @@ interface PromptInputProps {
     content: string;
   } | null;
   onCancelEdit?: () => void;
+  autoFocus?: boolean;
 }
 
 interface RecordingState {
@@ -114,6 +115,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   onCancelReply,
   editingMessage,
   onCancelEdit,
+  autoFocus = false,
 }) => {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState<RecordingState>({
@@ -272,6 +274,20 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       setText('');
     }
   }, [editingMessage]);
+
+  // Auto-focus when replying to a message
+  useEffect(() => {
+    if (replyingTo) {
+      setTimeout(() => textInputRef.current?.focus(), 100);
+    }
+  }, [replyingTo]);
+
+  // Auto-focus when autoFocus prop is true (for channel opening)
+  useEffect(() => {
+    if (autoFocus) {
+      setTimeout(() => textInputRef.current?.focus(), 200);
+    }
+  }, [autoFocus]);
 
   // Check for mentions when cursor position changes
   useEffect(() => {
