@@ -27,9 +27,6 @@ export type WebSocketEventType =
   | 'message_deleted'
   | 'message_reaction_added'
   | 'message_reaction_removed'
-  | 'thread_created'
-  | 'thread_reply'
-  | 'thread_deleted'
   | 'reaction_toggled'
   | 'reactions_cleared'
   | 'typing_indicator'
@@ -92,7 +89,6 @@ export interface TypingEvent {
   userName: string;
   isTyping: boolean;
   timestamp: string;
-  threadRootId?: string;
 }
 
 export interface MessageEvent {
@@ -117,19 +113,8 @@ export interface MessageEvent {
   userId: string;
   userName: string;
   timestamp: string;
-  isThreadReply?: boolean;
-  threadRootId?: string;
 }
 
-export interface ThreadEvent {
-  type: 'thread_created' | 'thread_reply' | 'thread_deleted';
-  threadRootId: string;
-  channelId: string;
-  createdBy?: string;
-  replyId?: string;
-  reply?: any;
-  message?: any;
-}
 
 export interface ReactionEvent {
   messageId: string;
@@ -246,7 +231,7 @@ class WebSocketService {
   private config: WebSocketConnectionConfig;
   
   // Enhanced connection management from messageWebSocketService
-  private heartbeatTimeoutMs = 15000; // 15 seconds timeout
+  private heartbeatTimeoutMs = 45000; // 45 seconds timeout for better stability
   private connectionState: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
   private reconnectTimeoutId: NodeJS.Timeout | null = null;
   private pendingOperations: Array<() => void> = [];
@@ -499,21 +484,6 @@ class WebSocketService {
       this.emitToListeners('message_deleted', data);
     });
 
-    // Thread events
-    this.socket.on('thread_created', (data) => {
-      console.log('🧵 WebSocket: Thread created:', data);
-      this.emitToListeners('thread_created', data);
-    });
-
-    this.socket.on('thread_reply', (data) => {
-      console.log('💬 WebSocket: Thread reply:', data);
-      this.emitToListeners('thread_reply', data);
-    });
-
-    this.socket.on('thread_deleted', (data) => {
-      console.log('🗑️ WebSocket: Thread deleted:', data);
-      this.emitToListeners('thread_deleted', data);
-    });
 
     // Reaction events
     this.socket.on('reaction_toggled', (data) => {
@@ -933,7 +903,7 @@ class WebSocketService {
   /**
    * Send typing indicator (works for both tasks and channels)
    */
-  startTyping(roomId: string, roomType: 'task' | 'channel' = 'task', threadRootId?: string): void {
+  startTyping(roomId: string, roomType: 'task' | 'channel' = 'task'): void {
     if (!roomId?.trim()) {
       throw new Error('Room ID is required');
     }
@@ -943,7 +913,7 @@ class WebSocketService {
         if (roomType === 'task') {
           this.socket.emit('typing_start', { taskId: roomId, timestamp: new Date().toISOString() });
         } else {
-          this.socket.emit('typing_start', { channelId: roomId, threadRootId, timestamp: new Date().toISOString() });
+          this.socket.emit('typing_start', { channelId: roomId, timestamp: new Date().toISOString() });
         }
       }
     });
@@ -952,7 +922,7 @@ class WebSocketService {
   /**
    * Stop typing indicator
    */
-  stopTyping(roomId: string, roomType: 'task' | 'channel' = 'task', threadRootId?: string): void {
+  stopTyping(roomId: string, roomType: 'task' | 'channel' = 'task'): void {
     if (!roomId?.trim()) {
       throw new Error('Room ID is required');
     }
@@ -962,7 +932,7 @@ class WebSocketService {
         if (roomType === 'task') {
           this.socket.emit('typing_stop', { taskId: roomId, timestamp: new Date().toISOString() });
         } else {
-          this.socket.emit('typing_stop', { channelId: roomId, threadRootId, timestamp: new Date().toISOString() });
+          this.socket.emit('typing_stop', { channelId: roomId, timestamp: new Date().toISOString() });
         }
       }
     });
@@ -1385,10 +1355,10 @@ export function useWebSocket() {
     leaveTask: (taskId: string) => webSocketService.leaveTask(taskId),
     
     // Unified typing indicators (works for both tasks and channels)
-    startTyping: (roomId: string, roomType?: 'task' | 'channel', threadRootId?: string) => 
-      webSocketService.startTyping(roomId, roomType, threadRootId),
-    stopTyping: (roomId: string, roomType?: 'task' | 'channel', threadRootId?: string) => 
-      webSocketService.stopTyping(roomId, roomType, threadRootId),
+    startTyping: (roomId: string, roomType?: 'task' | 'channel') => 
+      webSocketService.startTyping(roomId, roomType),
+    stopTyping: (roomId: string, roomType?: 'task' | 'channel') => 
+      webSocketService.stopTyping(roomId, roomType),
     
     // Legacy channel typing methods (for backward compatibility)
     startChannelTyping: (channelId: string) => webSocketService.startChannelTyping(channelId),

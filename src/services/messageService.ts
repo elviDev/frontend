@@ -4,15 +4,6 @@ import type {
   ApiResponse,
   ApiError,
   ApiMessage,
-  ApiThreadRepliesResponse,
-  ApiThreadDetails,
-  ApiReactionResponse,
-  ApiReactionStatsResponse,
-  ApiChannelReactionActivity,
-  ApiPopularReactionsResponse,
-  ApiChannelReactionStatsResponse,
-  SendMessageRequest,
-  AddThreadReplyRequest,
 } from '../types/api';
 
 class MessageService {
@@ -251,7 +242,6 @@ class MessageService {
     options: {
       limit?: number;
       offset?: number;
-      thread_root_id?: string;
       search?: string;
       message_type?: string;
       before?: string;
@@ -299,7 +289,6 @@ class MessageService {
       content: string;
       message_type?: 'text' | 'voice' | 'file' | 'system';
       reply_to_id?: string;
-      thread_root_id?: string;
       mentions?: string[];
       attachments?: Array<{
         file_id: string;
@@ -326,11 +315,6 @@ class MessageService {
     // Invalidate channel message caches after successful send
     if (result.success) {
       this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
-      
-      // Also invalidate thread caches if it's a thread reply
-      if (messageData.thread_root_id) {
-        this.invalidateCache(`threadReplies-{"messageId":"${messageData.thread_root_id}"`);
-      }
     }
     
     return result;
@@ -351,7 +335,6 @@ class MessageService {
     // Invalidate all message-related caches after successful edit
     if (result.success) {
       this.invalidateCache('channelMessages');
-      this.invalidateCache('threadReplies');
     }
     
     return result;
@@ -368,118 +351,11 @@ class MessageService {
     // Invalidate all message-related caches after successful delete
     if (result.success) {
       this.invalidateCache('channelMessages');
-      this.invalidateCache('threadReplies');
     }
     
     return result;
   }
 
-  // Thread Management
-  async createThread(messageId: string): Promise<ApiResponse<any>> {
-    console.log('🧵 MessageService: Creating thread for message:', messageId);
-    
-    return this.retryOperation(async () => {
-      const headers = await this.getAuthHeaders();
-      console.log('🧵 MessageService: Making create thread request with headers:', {
-        hasAuth: !!headers.Authorization,
-        messageId
-      });
-      
-      const response = await fetch(`${API_BASE_URL}/messages/${messageId}/thread`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
-      });
-
-      console.log('🧵 MessageService: Create thread response status:', response.status);
-      const result = await this.handleResponse<any>(response);
-      console.log('🧵 MessageService: Create thread result:', result);
-      
-      return result;
-    }, 'createThread');
-  }
-
-  async getThreadDetails(messageId: string): Promise<ApiResponse<any>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}/thread`, {
-      method: 'GET',
-      headers: await this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any>(response);
-  }
-
-  async getThreadReplies(
-    messageId: string,
-    options: {
-      limit?: number;
-      offset?: number;
-    } = {}
-  ): Promise<ApiResponse<{ thread_root_id: string; replies: any[]; pagination: any }>> {
-    const params = new URLSearchParams();
-    Object.entries(options).forEach(([key, value]) => {
-      if (value !== undefined) {
-        params.append(key, value.toString());
-      }
-    });
-
-    const response = await fetch(
-      `${API_BASE_URL}/messages/${messageId}/thread/replies?${params}`,
-      {
-        method: 'GET',
-        headers: await this.getAuthHeaders(),
-      }
-    );
-
-    return this.handleResponse<{ thread_root_id: string; replies: any[]; pagination: any }>(response);
-  }
-
-  async addThreadReply(
-    channelId: string,
-    messageId: string,
-    replyData: {
-      content: string;
-      message_type?: 'text' | 'voice' | 'file';
-      attachments?: Array<{
-        file_id: string;
-        filename: string;
-        file_type: string;
-        file_size: number;
-      }>;
-      reply_to_id?: string;
-      metadata?: Record<string, any>;
-    }
-  ): Promise<ApiResponse<any>> {
-    const url = `${API_BASE_URL}/channels/${channelId}/messages/${messageId}/thread`;
-    console.log('🧵 MessageService: Sending thread reply to:', url);
-    console.log('🧵 MessageService: Thread reply data:', replyData);
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: await this.getAuthHeaders(),
-      body: JSON.stringify(replyData),
-    });
-
-    console.log('🧵 MessageService: Thread reply response status:', response.status);
-    const result = await this.handleResponse<any>(response);
-    console.log('🧵 MessageService: Thread reply result:', result);
-    
-    // Invalidate caches after successful reply
-    if (result.success) {
-      this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
-      this.invalidateCache(`threadReplies-{"messageId":"${messageId}"`);
-    }
-    
-    return result;
-  }
-
-  async deleteThread(messageId: string): Promise<ApiResponse<any>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}/thread`, {
-      method: 'DELETE',
-      headers: await this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any>(response);
-  }
 
   // Reaction Management
   async toggleReaction(
@@ -669,7 +545,6 @@ class MessageService {
     if (result.success) {
       this.invalidateCache(`messageReplies-{"channelId":"${channelId}","messageId":"${messageId}"`);
       this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
-      this.invalidateCache(`threadReplies-{"messageId":"${messageId}"`);
     }
     
     return result;
@@ -696,7 +571,6 @@ class MessageService {
     if (result.success) {
       this.invalidateCache(`messageReplies-{"channelId":"${channelId}","messageId":"${messageId}"`);
       this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
-      this.invalidateCache(`threadReplies-{"messageId":"${messageId}"`);
     }
     
     return result;
@@ -721,7 +595,6 @@ class MessageService {
     if (result.success) {
       this.invalidateCache(`messageReplies-{"channelId":"${channelId}","messageId":"${messageId}"`);
       this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
-      this.invalidateCache(`threadReplies-{"messageId":"${messageId}"`);
     }
     
     return result;

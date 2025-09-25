@@ -37,7 +37,7 @@ import { TaskSearchAndFilters } from '../../components/task/TaskSearchAndFilters
 import { TaskFilterModal } from '../../components/task/TaskFilterModal';
 import { TaskViewRenderer } from '../../components/task/TaskViewRenderer';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { useWebSocket } from '../../services/unifiedWebSocketService';
+import { useWebSocket } from '../../services/websocketService';
 
 type TasksScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 

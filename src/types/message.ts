@@ -28,17 +28,6 @@ export interface MessageAttachment {
   mimeType?: string;
 }
 
-export interface ThreadInfo {
-  replyCount: number;
-  reply_count?: number; // API field
-  lastReplyAt?: Date;
-  last_reply_at?: string; // API field
-  lastReplyBy?: User;
-  last_reply_by_details?: User; // API field
-  participants: User[];
-  participant_details?: User[]; // API field
-  participant_count?: number; // API field
-}
 
 export interface Message {
   id: string;
@@ -55,12 +44,6 @@ export interface Message {
   type: 'text' | 'image' | 'file' | 'voice' | 'system';
   message_type?: string; // API field
   
-  // Thread support
-  threadRootId?: string;
-  thread_root_id?: string; // API field
-  isThreadRoot?: boolean;
-  threadInfo?: ThreadInfo;
-  thread_info?: ThreadInfo; // API field
   reply_to_id?: string; // API field
   
   // Reactions
@@ -100,9 +83,6 @@ export interface Message {
   };
   reply_to?: any; // API field
   
-  // Thread counts (for thread root messages)
-  reply_count?: number; // API field
-  last_reply_timestamp?: string; // API field
   
   // Optimistic updates and state tracking
   isOptimistic?: boolean;

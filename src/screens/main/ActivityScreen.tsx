@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store/store';
-import { useWebSocket } from '../../services/unifiedWebSocketService';
+import { useWebSocket } from '../../services/websocketService';
 import { activityService, Activity } from '../../services/api/activityService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { useAppTranslation } from '../../hooks/useAppTranslation';

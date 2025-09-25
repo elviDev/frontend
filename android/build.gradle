@@ -8,8 +8,13 @@ buildscript {
         kotlinVersion = "2.1.20"
     }
     repositories {
+        // Try alternative mirrors first
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://repo1.maven.org/maven2" }
         google()
         mavenCentral()
+        gradlePluginPortal()
     }
     dependencies {
         classpath("com.android.tools.build:gradle")
@@ -19,3 +24,19 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+allprojects {
+    repositories {
+        // Try alternative mirrors first for better connectivity
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://repo1.maven.org/maven2" }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        // Jitpack for GitHub-based dependencies
+        maven { url "https://jitpack.io" }
+        // Local repository for offline builds
+        mavenLocal()
+    }
+}

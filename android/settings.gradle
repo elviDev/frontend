@@ -1,5 +1,34 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+pluginManagement { 
+    repositories {
+        // Alternative mirrors for better connectivity
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://repo1.maven.org/maven2" }
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+        mavenLocal()
+    }
+    includeBuild("../node_modules/@react-native/gradle-plugin") 
+}
+
 plugins { id("com.facebook.react.settings") }
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        // Alternative mirrors for better connectivity
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://repo1.maven.org/maven2" }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url "https://jitpack.io" }
+        mavenLocal()
+    }
+}
+
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'app'
 include ':app'

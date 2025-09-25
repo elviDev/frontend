@@ -29,7 +29,6 @@ interface MessageListProps {
   onEdit?: (message: MessageType) => void;
   onDelete?: (messageId: string) => void;
   onReaction?: (messageId: string, emoji: string) => void;
-  onThreadOpen?: (message: MessageType) => void;
   onUserPress?: (userId: string) => void;
   onScrollToBottom?: () => void;
 }
@@ -49,7 +48,6 @@ export const MessageList: React.FC<MessageListProps> = ({
   onEdit,
   onDelete,
   onReaction,
-  onThreadOpen,
   onUserPress,
   onScrollToBottom,
 }) => {
@@ -133,12 +131,11 @@ export const MessageList: React.FC<MessageListProps> = ({
           onEdit={onEdit}
           onDelete={onDelete}
           onReaction={onReaction}
-          onThreadOpen={onThreadOpen}
           onUserPress={onUserPress}
         />
       </View>
     );
-  }, [messages.length, shouldGroupMessage, shouldShowDateSeparator, renderDateSeparator, currentUserId, onReply, onEdit, onDelete, onReaction, onThreadOpen, onUserPress]);
+  }, [messages.length, shouldGroupMessage, shouldShowDateSeparator, renderDateSeparator, currentUserId, onReply, onEdit, onDelete, onReaction, onUserPress]);
 
   const renderHeader = useCallback(() => {
     if (!hasMoreMessages) {

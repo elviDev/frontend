@@ -56,8 +56,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     loadMoreMessages,
     startTyping,
     stopTyping,
-    createThread,
-    updateThreadInfo,
   } = useMessages(channelId);
   
   const {
@@ -137,18 +135,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     }
   };
 
-  const handleThreadOpen = async (message: Message) => {
-    // Mark the message as a thread root if it's not already
-    if (!message.isThreadRoot) {
-      await createThread(message.id);
-    }
-    
-    navigation.navigate('ThreadScreen', {
-      parentMessage: message,
-      channelId,
-      channelName,
-    });
-  };
 
   const handleGenerateSummary = () => {
     generateSummary();
@@ -161,29 +147,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
   const handleUserPress = (userId: string) => {
     showInfo(`Navigate to user: ${userId}`);
   };
-
-  // Note: Auto-join functionality temporarily disabled to avoid 500 errors
-  // The user is likely already a member if they can access this channel
-  // useEffect(() => {
-  //   const joinChannelOnOpen = async () => {
-  //     try {
-  //       if (!currentUser?.id) {
-  //         console.warn('⚠️ Cannot join channel: user not available');
-  //         return;
-  //       }
-  //       
-  //       console.log('🚪 Attempting to join channel:', channelId, 'for user:', currentUser.id);
-  //       const joined = await channelService.addChannelMember(channelId, currentUser.id, 'member');
-  //       if (joined) {
-  //         console.log('✅ Successfully joined channel:', channelId);
-  //       }
-  //     } catch (err: any) {
-  //       console.warn('⚠️ Failed to join channel (user may already be a member):', err?.message || err);
-  //     }
-  //   };
-  //   
-  //   joinChannelOnOpen();
-  // }, [channelId, currentUser?.id]);
 
 
   return (
@@ -235,7 +198,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
           onEdit={setEditingMessage}
           onDelete={handleDeleteMessage}
           onReaction={handleReaction}
-          onThreadOpen={handleThreadOpen}
           onUserPress={handleUserPress}
         />
 

@@ -16,11 +16,6 @@ export type MainStackParamList = {
     channelName: string;
     members: any[];
   };
-  ThreadScreen: {
-    parentMessage: any;
-    channelId: string;
-    channelName: string;
-  };
   TaskDetailScreen: {
     taskId: string;
   };

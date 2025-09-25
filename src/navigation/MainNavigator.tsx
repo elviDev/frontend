@@ -2,7 +2,6 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TabNavigator } from './TabNavigator';
 import { ChannelDetailScreen } from '../screens/chats/ChannelDetailScreen';
-import { ThreadScreen } from '../screens/messages/ThreadScreen';
 import { TaskDetailScreen } from '../screens/tasks/TaskDetailScreen';
 import { TaskCreateScreen } from '../screens/tasks/TaskCreateScreen';
 import { UserProfileScreen } from '../screens/users/UserProfileScreen';
@@ -14,11 +13,6 @@ export type MainStackParamList = {
     channelId: string;
     channelName: string;
     members: any[];
-  };
-  ThreadScreen: {
-    parentMessage: any;
-    channelId: string;
-    channelName: string;
   };
   TaskDetailScreen: {
     taskId: string;
@@ -42,10 +36,6 @@ export const MainNavigator: React.FC = () => {
       <Stack.Screen
         name="ChannelDetailScreen"
         component={ChannelDetailScreen}
-      />
-      <Stack.Screen
-        name="ThreadScreen"
-        component={ThreadScreen}
       />
       <Stack.Screen
         name="TaskDetailScreen"

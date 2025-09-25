@@ -371,7 +371,7 @@ class NotificationService {
     senderId: string;
     senderName: string;
     message: string;
-    type: 'new_message' | 'thread_reply';
+    type: 'new_message';
     parentMessageId?: string;
   }): Promise<void> {
     try {

@@ -2,14 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { useToast } from '../contexts/ToastContext';
 import { RootState } from '../store/store';
-import type { Message, TypingUser, ThreadInfo } from '../types/message';
+import type { Message, TypingUser } from '../types/message';
 import { messageService } from '../services/messageService';
 import { webSocketService } from '../services/websocketService';
 
 interface SendMessageParams {
   content: string;
   type: 'text' | 'image' | 'file' | 'voice';
-  threadRootId?: string;
   replyTo?: {
     id: string;
     content: string;
@@ -18,7 +17,7 @@ interface SendMessageParams {
   attachments?: any[];
 }
 
-export const useMessages = (channelId: string, threadRootId?: string) => {
+export const useMessages = (channelId: string) => {
   const { user: currentUser } = useSelector((state: RootState) => state.auth);
   const { showError, showSuccess } = useToast();
 
@@ -47,11 +46,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     isInitialLoad: true,
   });
   
-  // Enhanced thread state management
-  const [threadCache, setThreadCache] = useState<Map<string, Message[]>>(new Map());
-  const [threadInfoCache, setThreadInfoCache] = useState<Map<string, ThreadInfo>>(new Map());
-  const [activeThreads, setActiveThreads] = useState<Set<string>>(new Set());
-  const [threadLoadingStates, setThreadLoadingStates] = useState<Map<string, boolean>>(new Map());
 
   // Enhanced deduplication with conflict resolution
   const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
@@ -130,23 +124,30 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     if (!apiMessage) {
       throw new Error('Invalid API message: null or undefined');
     }
+
+    console.log('🔧 Transforming API message:', apiMessage );
     
     return {
     id: apiMessage.id,
     content: apiMessage.content,
     sender: {
-      id: apiMessage.user_details?.id || apiMessage.user_id,
-      name: apiMessage.user_details?.name || 'Unknown User',
-      email: apiMessage.user_details?.email || '',
-      avatar: apiMessage.user_details?.avatar_url || apiMessage.user_details?.avatar || '',
-      role: apiMessage.user_details?.role || 'member',
+      id: apiMessage?.user_id || apiMessage.user_id,
+      name: apiMessage?.user_name || 'Unknown User',
+      email: apiMessage?.user_email || '',
+      avatar_url: apiMessage?.avatar_url ||  '',
+      role: apiMessage?.user_role || 'member',
       isOnline: true,
     },
-    user_details: apiMessage.user_details,
+    user_details: {
+      id: apiMessage?.user_id,
+      name: apiMessage?.user_name || 'Unknown User',
+      email: apiMessage?.user_email || '',
+      avatar_url: apiMessage?.avatar_url ||  '',
+      role: apiMessage?.user_role || 'member',
+    },
     channelId: apiMessage.channel_id,
     timestamp: apiMessage.created_at ? new Date(apiMessage.created_at) : new Date(),
     type: apiMessage.message_type || 'text',
-    threadRootId: apiMessage.thread_root_id,
     reactions: Array.isArray(apiMessage.reactions) ? apiMessage.reactions : [],
     attachments: Array.isArray(apiMessage.attachments) ? apiMessage.attachments : [],
     replyTo: apiMessage.reply_to_id ? {
@@ -155,19 +156,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       sender: apiMessage.reply_to?.sender || { id: '', name: 'Unknown' },
     } : undefined,
     isOptimistic: false,
-    isThreadRoot: apiMessage.is_thread_root || !!apiMessage.thread_info,
-    threadInfo: apiMessage.thread_info ? {
-      replyCount: apiMessage.thread_info.reply_count || apiMessage.reply_count || 0,
-      lastReplyAt: (apiMessage.thread_info.last_reply_at || apiMessage.last_reply_timestamp) ? 
-        new Date(apiMessage.thread_info.last_reply_at || apiMessage.last_reply_timestamp) : undefined,
-      lastReplyBy: apiMessage.thread_info.last_reply_by_details,
-      participants: apiMessage.thread_info.participant_details || [],
-    } : (apiMessage.reply_count > 0 ? {
-      replyCount: apiMessage.reply_count,
-      lastReplyAt: apiMessage.last_reply_timestamp ? new Date(apiMessage.last_reply_timestamp) : undefined,
-      lastReplyBy: undefined,
-      participants: [],
-    } : undefined),
     isEdited: apiMessage.is_edited,
     editedAt: apiMessage.edited_at ? new Date(apiMessage.edited_at) : undefined,
     isDeleted: !!apiMessage.deleted_at,
@@ -176,7 +164,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
 
 
   const loadMessages = useCallback(async () => {
-    const loadKey = `${channelId}-${threadRootId || 'channel'}`;
+    const loadKey = `${channelId}-channel`;
     console.log('🔄 loadMessages called for:', loadKey);
     
     // Cancel any existing load operation
@@ -199,119 +187,60 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     setError(null);
 
     try {
-      if (threadRootId) {
-        console.log('🧵 Loading thread replies for:', threadRootId);
-        const response = await messageService.getThreadReplies(threadRootId, {
-          limit: 50,
-          offset: 0,
-        });
+      console.log('📨 Loading channel messages for:', channelId);
+      const response = await messageService.getChannelMessages(channelId, {
+        limit: 50,
+        offset: 0,
+      });
+      
+      console.log('📨 Channel messages response:', response);
+      
+      // Check if operation was aborted
+      if (signal.aborted || !isMountedRef.current) return;
+      
+      if (response.success || (response.data !== undefined && response.data !== null)) {
+        // Handle empty messages array gracefully
+        const messagesArray = Array.isArray(response.data) ? response.data : [];
+        const transformedMessages = messagesArray.map(transformApiMessage);
+        console.log('✅ Channel messages transformed:', transformedMessages.length, 'messages');
         
-        console.log('🧵 Thread replies response:', response);
-        
-        // Check if operation was aborted
-        if (signal.aborted || !isMountedRef.current) return;
-        
-        if (response.success) {
-          // Handle empty replies array gracefully
-          const replies = response.data?.replies || [];
-          const transformedMessages = replies.map(transformApiMessage);
-          console.log('✅ Thread replies transformed:', transformedMessages.length, 'messages');
+        // Double-check component is still mounted before updating state
+        if (isMountedRef.current) {
+          // Sort messages by timestamp (oldest first)
+          const sortedMessages = transformedMessages.sort((a, b) => 
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          setMessages(deduplicateMessages(sortedMessages));
+          const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
+          setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
           
-          // Double-check component is still mounted before updating state
-          if (isMountedRef.current) {
-            // Sort messages by timestamp (oldest first)
-            const sortedMessages = transformedMessages.sort((a, b) => 
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            );
-            setMessages(deduplicateMessages(sortedMessages));
-            const pagination = response.data?.pagination || { has_more: false, total: 0, next_cursor: null };
-            setHasMoreMessages(pagination.has_more || false);
-            
-            // Initialize pagination state for thread
-            setPagination({
-              offset: transformedMessages.length,
-              limit: 20,
-              total: pagination.total || 0,
-              hasMore: pagination.has_more || false,
-              nextCursor: pagination.next_cursor || null,
-              isInitialLoad: false,
-            });
-            
-            loadedRef.current = loadKey;
-          }
-        } else {
-          console.error('❌ Thread replies response not successful:', response);
-          if (isMountedRef.current) {
-            // Don't show error for empty results, just show empty state
-            setMessages([]);
-            setHasMoreMessages(false);
-            setPagination({
-              offset: 0,
-              limit: 20,
-              total: 0,
-              hasMore: false,
-              nextCursor: null,
-              isInitialLoad: false,
-            });
-            loadedRef.current = loadKey;
-          }
+          // Initialize pagination state for channel
+          setPagination({
+            offset: transformedMessages.length,
+            limit: 20,
+            total: paginationData.total || 0,
+            hasMore: paginationData.hasMore || paginationData.has_more || false,
+            nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
+            isInitialLoad: false,
+          });
+          
+          loadedRef.current = loadKey;
         }
       } else {
-        console.log('📨 Loading channel messages for:', channelId);
-        const response = await messageService.getChannelMessages(channelId, {
-          limit: 50,
-          offset: 0,
-        });
-        
-        console.log('📨 Channel messages response:', response);
-        
-        // Check if operation was aborted
-        if (signal.aborted || !isMountedRef.current) return;
-        
-        if (response.success || (response.data !== undefined && response.data !== null)) {
-          // Handle empty messages array gracefully
-          const messagesArray = Array.isArray(response.data) ? response.data : [];
-          const transformedMessages = messagesArray.map(transformApiMessage);
-          console.log('✅ Channel messages transformed:', transformedMessages.length, 'messages');
-          
-          // Double-check component is still mounted before updating state
-          if (isMountedRef.current) {
-            // Sort messages by timestamp (oldest first)
-            const sortedMessages = transformedMessages.sort((a, b) => 
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            );
-            setMessages(deduplicateMessages(sortedMessages));
-            const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
-            setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
-            
-            // Initialize pagination state for channel
-            setPagination({
-              offset: transformedMessages.length,
-              limit: 20,
-              total: paginationData.total || 0,
-              hasMore: paginationData.hasMore || paginationData.has_more || false,
-              nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
-              isInitialLoad: false,
-            });
-            
-            loadedRef.current = loadKey;
-          }
-        } else {
-          console.error('❌ Channel messages response not successful:', response);
-          if (isMountedRef.current) {
-            // Don't show error for empty results, just show empty state
-            setMessages([]);
-            setHasMoreMessages(false);
-            setPagination({
-              offset: 0,
-              limit: 20,
-              total: 0,
-              hasMore: false,
-              nextCursor: null,
-              isInitialLoad: false,
-            });
-            loadedRef.current = loadKey;
-          }
+        console.error('❌ Channel messages response not successful:', response);
+        if (isMountedRef.current) {
+          // Don't show error for empty results, just show empty state
+          setMessages([]);
+          setHasMoreMessages(false);
+          setPagination({
+            offset: 0,
+            limit: 20,
+            total: 0,
+            hasMore: false,
+            nextCursor: null,
+            isInitialLoad: false,
+          });
+          loadedRef.current = loadKey;
         }
       }
     } catch (err: any) {
@@ -321,7 +250,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         stack: err.stack,
         name: err.name,
         channelId,
-        threadRootId,
         apiError: err.error
       });
       
@@ -373,7 +301,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         setIsLoading(false);
       }
     }
-  }, [channelId, threadRootId]);
+  }, [channelId, deduplicateMessages, transformApiMessage]);
 
   // Store loadMessages in ref for stable reference in useEffect
   loadMessagesRef.current = loadMessages;
@@ -390,7 +318,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
 
     // Enhanced request deduplication with pagination state
-    const requestKey = `loadMore-${channelId}-${threadRootId || 'channel'}-${pagination.offset}-${pagination.nextCursor || 'none'}`;
+    const requestKey = `loadMore-${channelId}-channel-${pagination.offset}-${pagination.nextCursor || 'none'}`;
     if (pendingRequestsRef.current.has(requestKey)) {
       console.log('🔄 Skipping duplicate loadMore request:', requestKey);
       return;
@@ -402,8 +330,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     console.log('📄 Loading more messages:', {
       currentOffset: pagination.offset,
       currentCount: messages.length,
-      nextCursor: pagination.nextCursor,
-      threadRootId
+      nextCursor: pagination.nextCursor
     });
 
     try {
@@ -413,58 +340,29 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         ...(pagination.nextCursor && { cursor: pagination.nextCursor }),
       };
       
-      let response;
+      // Load more channel messages
+      const response = await messageService.getChannelMessages(channelId, requestOptions);
       
-      if (threadRootId) {
-        // Load more thread replies
-        response = await messageService.getThreadReplies(threadRootId, requestOptions);
+      if (response.success && isMountedRef.current) {
+        // Handle empty messages array gracefully
+        const messagesArray = Array.isArray(response.data) ? response.data : [];
+        const transformedMessages = messagesArray.map(transformApiMessage);
+        console.log('📨 Loaded', transformedMessages.length, 'more channel messages');
         
-        if (response.success && isMountedRef.current) {
-          // Handle empty replies array gracefully
-          const replies = response.data?.replies || [];
-          const transformedMessages = replies.map(transformApiMessage);
-          console.log('🧵 Loaded', transformedMessages.length, 'more thread replies');
-          
-          // Smart message merging to prevent duplicates
-          updateMessages(prev => [...prev, ...transformedMessages]);
-          
-          // Update pagination state
-          const pagination = response.data?.pagination || { has_more: false, next_cursor: null, total: 0 };
-          setPagination(prev => ({
-            ...prev,
-            offset: prev.offset + transformedMessages.length,
-            hasMore: pagination.has_more || false,
-            nextCursor: pagination.next_cursor || null,
-            total: pagination.total || prev.total,
-          }));
-          
-          setHasMoreMessages(pagination.has_more || false);
-        }
-      } else {
-        // Load more channel messages
-        response = await messageService.getChannelMessages(channelId, requestOptions);
+        // Smart message merging to prevent duplicates
+        updateMessages(prev => [...prev, ...transformedMessages]);
         
-        if (response.success && isMountedRef.current) {
-          // Handle empty messages array gracefully
-          const messagesArray = Array.isArray(response.data) ? response.data : [];
-          const transformedMessages = messagesArray.map(transformApiMessage);
-          console.log('📨 Loaded', transformedMessages.length, 'more channel messages');
-          
-          // Smart message merging to prevent duplicates
-          updateMessages(prev => [...prev, ...transformedMessages]);
-          
-          // Update pagination state
-          const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
-          setPagination(prev => ({
-            ...prev,
-            offset: prev.offset + transformedMessages.length,
-            hasMore: paginationData.hasMore || paginationData.has_more || false,
-            nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
-            total: paginationData.total || prev.total,
-          }));
-          
-          setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
-        }
+        // Update pagination state
+        const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
+        setPagination(prev => ({
+          ...prev,
+          offset: prev.offset + transformedMessages.length,
+          hasMore: paginationData.hasMore || paginationData.has_more || false,
+          nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
+          total: paginationData.total || prev.total,
+        }));
+        
+        setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
       }
       
       console.log('✅ Load more completed successfully');
@@ -508,8 +406,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     isLoadingMore, 
     hasMoreMessages, 
     pagination,
-    channelId, 
-    threadRootId, 
+    channelId,
     messages.length, 
     showError, 
     transformApiMessage,
@@ -534,7 +431,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       channelId,
       timestamp: new Date(),
       type: params.type,
-      threadRootId: params.threadRootId,
       reactions: [],
       attachments: params.attachments || [],
       replyTo: params.replyTo,
@@ -551,36 +447,18 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     console.log('📤 Sending message optimistically:', optimisticId);
 
     try {
-      let response;
-      
-      if (threadRootId) {
-        // Send as thread reply using the correct endpoint: POST /channels/{channelId}/messages/{messageId}/thread
-        response = await messageService.addThreadReply(channelId, threadRootId, {
-          content: params.content,
-          message_type: params.type === 'image' ? 'file' : params.type,
-          reply_to_id: params.replyTo?.id,
-          attachments: params.attachments?.map(att => ({
-            file_id: att.id,
-            filename: att.name,
-            file_type: att.type,
-            file_size: att.size || 0,
-          })),
-        });
-      } else {
-        // Send as channel message  
-        response = await messageService.sendMessage(channelId, {
-          content: params.content,
-          message_type: params.type === 'image' ? 'file' : (params.type as 'text' | 'voice' | 'file' | 'system'),
-          reply_to_id: params.replyTo?.id,
-          thread_root_id: params.threadRootId,
-          attachments: params.attachments?.map(att => ({
-            file_id: att.id,
-            filename: att.name,
-            file_type: att.type,
-            file_size: att.size || 0,
-          })),
-        });
-      }
+      // Send as channel message  
+      const response = await messageService.sendMessage(channelId, {
+        content: params.content,
+        message_type: params.type === 'image' ? 'file' : (params.type as 'text' | 'voice' | 'file' | 'system'),
+        reply_to_id: params.replyTo?.id,
+        attachments: params.attachments?.map(att => ({
+          file_id: att.id,
+          filename: att.name,
+          file_type: att.type,
+          file_size: att.size || 0,
+        })),
+      });
 
       if (response.success && response.data) {
         // Replace optimistic message with real message from API
@@ -621,7 +499,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
           channelId,
           timestamp: new Date(),
           type: params.type,
-          threadRootId: params.threadRootId,
           reactions: [],
           attachments: params.attachments || [],
           replyTo: params.replyTo,
@@ -683,7 +560,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         return updated;
       });
     }
-  }, [showSuccess, showError, currentUser, channelId, threadRootId, updateMessages, updateMessageCache, transformApiMessage]);
+  }, [showSuccess, showError, currentUser, channelId, updateMessages, updateMessageCache, transformApiMessage]);
 
   const editMessage = useCallback(async (messageId: string, content: string, retryCount = 0) => {
     const originalMessage = messages.find(m => m.id === messageId);
@@ -966,117 +843,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
   }, [currentUser, messages]);
 
-  // Enhanced thread management with proper state handling
-  const createThread = useCallback(async (messageId: string) => {
-    // Optimistically mark as thread root
-    setMessages(prev => prev.map(msg => 
-      msg.id === messageId 
-        ? { 
-            ...msg, 
-            isThreadRoot: true, 
-            threadInfo: { replyCount: 0, participants: [] }
-          }
-        : msg
-    ));
-    
-    // Track active thread
-    setActiveThreads(prev => new Set([...prev, messageId]));
-    
-    try {
-      const response = await messageService.createThread(messageId);
-      
-      if (response.success && response.data) {
-        const threadInfo: ThreadInfo = {
-          replyCount: response.data.reply_count || 0,
-          lastReplyAt: response.data.last_reply_at ? new Date(response.data.last_reply_at) : undefined,
-          lastReplyBy: response.data.last_reply_by_details,
-          participants: response.data.participant_details || [],
-        };
-        
-        // Update thread info cache
-        setThreadInfoCache(prev => new Map([...prev, [messageId, threadInfo]]));
-        
-        // Update message with real thread info from API
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, isThreadRoot: true, threadInfo }
-            : msg
-        ));
-        
-        console.log('✅ Thread created successfully:', messageId);
-        return threadInfo;
-      } else {
-        throw new Error((response as any).error?.message || 'Failed to create thread');
-      }
-    } catch (err: any) {
-      console.error('❌ Failed to create thread:', err);
-      
-      // Show user-friendly error message
-      const errorMessage = err.error?.message || err.message || 'Failed to create thread';
-      showError(`Failed to create thread: ${errorMessage}`);
-      
-      // Revert optimistic update on error
-      setMessages(prev => prev.map(msg => 
-        msg.id === messageId 
-          ? { ...msg, isThreadRoot: false, threadInfo: undefined }
-          : msg
-      ));
-      
-      setActiveThreads(prev => {
-        const updated = new Set(prev);
-        updated.delete(messageId);
-        return updated;
-      });
-      
-      throw err;
-    }
-  }, [showError]);
-
-  // Enhanced thread info management with cache synchronization
-  const updateThreadInfo = useCallback((messageId: string, newReply: Message | any) => {
-    const replyUser = newReply.sender || newReply.user_details;
-    
-    // Update thread info cache
-    setThreadInfoCache(prev => {
-      const currentInfo = prev.get(messageId);
-      if (!currentInfo) return prev;
-      
-      const currentParticipants = currentInfo.participants || [];
-      const isNewParticipant = !currentParticipants.some(p => p.id === replyUser?.id);
-      
-      const updatedInfo: ThreadInfo = {
-        replyCount: currentInfo.replyCount + 1,
-        lastReplyAt: new Date(),
-        lastReplyBy: replyUser,
-        participants: isNewParticipant && replyUser
-          ? [...currentParticipants, replyUser]
-          : currentParticipants,
-      };
-      
-      return new Map([...prev, [messageId, updatedInfo]]);
-    });
-    
-    // Update message thread info
-    setMessages(prev => prev.map(msg => {
-      if (msg.id !== messageId || !msg.isThreadRoot) return msg;
-      
-      const currentParticipants = msg.threadInfo?.participants || [];
-      const isNewParticipant = !currentParticipants.some(p => p.id === replyUser?.id);
-      
-      return {
-        ...msg,
-        threadInfo: {
-          replyCount: (msg.threadInfo?.replyCount || 0) + 1,
-          lastReplyAt: new Date(),
-          lastReplyBy: replyUser,
-          participants: isNewParticipant && replyUser
-            ? [...currentParticipants, replyUser]
-            : currentParticipants,
-        },
-      };
-    }));
-  }, []);
-
   // Enhanced typing indicators with debouncing and proper cleanup
   const startTyping = useCallback(() => {
     const now = Date.now();
@@ -1087,7 +853,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
     
     lastTypingTimestampRef.current = now;
-    webSocketService.startTyping(channelId, 'channel', threadRootId);
+    webSocketService.startTyping(channelId, 'channel');
     
     // Clear existing timeout
     if (typingDebounceRef.current) {
@@ -1096,12 +862,12 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
 
     // Auto-stop typing after 3 seconds of inactivity
     typingDebounceRef.current = setTimeout(() => {
-      webSocketService.stopTyping(channelId, 'channel', threadRootId);
+      webSocketService.stopTyping(channelId, 'channel');
     }, 3000);
-  }, [channelId, threadRootId]);
+  }, [channelId]);
 
   const stopTyping = useCallback(() => {
-    webSocketService.stopTyping(channelId, 'channel', threadRootId);
+    webSocketService.stopTyping(channelId, 'channel');
     
     // Clear all typing-related timeouts
     if (typingTimeoutRef.current) {
@@ -1115,7 +881,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     }
 
     lastTypingTimestampRef.current = 0;
-  }, [channelId, threadRootId]);
+  }, [channelId]);
 
   // Enhanced WebSocket event handlers with sync support
   useEffect(() => {
@@ -1152,15 +918,9 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
         }
         
         try {
-          if (threadRootId && data.threadRootId === threadRootId) {
-            // New reply in current thread
-            const newMessage = transformApiMessage(data.message);
-            setMessages(prev => deduplicateMessages([...prev, newMessage]));
-          } else if (!threadRootId && !data.isThreadReply) {
-            // New message in current channel (not a thread reply)
-            const newMessage = transformApiMessage(data.message);
-            setMessages(prev => deduplicateMessages([...prev, newMessage]));
-          }
+          // New message in current channel
+          const newMessage = transformApiMessage(data.message);
+          setMessages(prev => deduplicateMessages([...prev, newMessage]));
         } catch (error) {
           console.error('❌ Error processing message_sent event:', error);
           console.log('📋 Message data that caused error:', data);
@@ -1191,63 +951,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     const handleMessageDeleted = (data: any) => {
       if (data.channelId === channelId) {
         setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
-      }
-    };
-
-    // Enhanced thread event handling
-    const handleThreadCreated = (data: any) => {
-      if (data.channelId === channelId) {
-        const threadInfo: ThreadInfo = {
-          replyCount: data.reply_count || 0,
-          participants: data.participant_details || [],
-          lastReplyAt: data.last_reply_at ? new Date(data.last_reply_at) : undefined,
-          lastReplyBy: data.last_reply_by_details,
-        };
-        
-        // Update thread info cache
-        setThreadInfoCache(prev => new Map([...prev, [data.threadRootId, threadInfo]]));
-        setActiveThreads(prev => new Set([...prev, data.threadRootId]));
-        
-        // Update message state
-        setMessages(prev => prev.map(msg => 
-          msg.id === data.threadRootId 
-            ? { ...msg, isThreadRoot: true, threadInfo }
-            : msg
-        ));
-        
-        console.log('🧵 Thread created via WebSocket:', data.threadRootId);
-      }
-    };
-
-    const handleThreadReply = (data: any) => {
-      if (data.channelId === channelId) {
-        const replyMessage = data.reply || data.message;
-        
-        // Validate that reply message data exists and is not null/undefined
-        if (!replyMessage) {
-          console.warn('🚨 Received thread_reply event with null/undefined reply data:', data);
-          return;
-        }
-        
-        try {
-          if (threadRootId && data.threadRootId === threadRootId) {
-            // Add reply to current thread view
-            const newMessage = transformApiMessage(replyMessage);
-            setMessages(prev => deduplicateMessages([newMessage, ...prev]));
-          } else if (!threadRootId) {
-            // Update thread info in channel view
-            updateThreadInfo(data.threadRootId, replyMessage);
-          }
-          
-          console.log('💬 Thread reply received:', {
-            threadRootId: data.threadRootId,
-            currentThread: threadRootId,
-            isCurrentThread: threadRootId === data.threadRootId
-          });
-        } catch (error) {
-          console.error('❌ Error processing thread_reply event:', error);
-          console.log('📋 Reply data that caused error:', data);
-        }
       }
     };
 
@@ -1282,7 +985,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
 
     // Enhanced typing indicators with proper user management
     const handleTypingIndicator = (data: any) => {
-      if (data.channelId === channelId && data.threadRootId === threadRootId) {
+      if (data.channelId === channelId) {
         const currentUserId = currentUser?.id;
         
         // Don't show typing indicator for current user
@@ -1316,8 +1019,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     webSocketService.on('message_sent', handleMessageSent);
     webSocketService.on('message_updated', handleMessageUpdated);
     webSocketService.on('message_deleted', handleMessageDeleted);
-    webSocketService.on('thread_created', handleThreadCreated);
-    webSocketService.on('thread_reply', handleThreadReply);
     webSocketService.on('reaction_toggled', handleReactionToggled);
     webSocketService.on('reactions_cleared', handleReactionsCleared);
     webSocketService.on('typing_indicator', handleTypingIndicator);
@@ -1343,7 +1044,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       setError('Connection lost. Please check your internet connection and refresh the page.');
     };
     
-    const handleSyncResponse = (data: { messages: any[]; reactions: any[]; threads: any[] }) => {
+    const handleSyncResponse = (data: { messages: any[]; reactions: any[] }) => {
       console.log('🔄 Processing sync response:', data);
       
       try {
@@ -1356,12 +1057,8 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
                 return false;
               }
               
-              // Only process messages for current channel/thread
-              if (threadRootId) {
-                return msg.thread_root_id === threadRootId;
-              } else {
-                return msg.channel_id === channelId && !msg.thread_root_id;
-              }
+              // Only process messages for current channel
+              return msg.channel_id === channelId;
             })
             .map(msg => {
               try {
@@ -1383,7 +1080,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
           }
         }
         
-        // Handle synced reactions and threads if needed
+        // Handle synced reactions if needed
         if (data.reactions) {
           console.log('🔄 Synced reactions:', data.reactions.length);
           // Update reactions in existing messages
@@ -1414,8 +1111,6 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       webSocketService.off('message_sent', handleMessageSent);
       webSocketService.off('message_updated', handleMessageUpdated);
       webSocketService.off('message_deleted', handleMessageDeleted);
-      webSocketService.off('thread_created', handleThreadCreated);
-      webSocketService.off('thread_reply', handleThreadReply);
       webSocketService.off('reaction_toggled', handleReactionToggled);
       webSocketService.off('reactions_cleared', handleReactionsCleared);
       webSocketService.off('typing_indicator', handleTypingIndicator);
@@ -1427,14 +1122,14 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       // Leave channel
       webSocketService.leaveChannel(channelId);
     };
-  }, [channelId, threadRootId]); // Removed transformApiMessage - it's now stable
+  }, [channelId, currentUser, deduplicateMessages, transformApiMessage, updateMessages]);
 
-  // Load initial messages when channel/thread changes
+  // Load initial messages when channel changes
   useEffect(() => {
-    const loadKey = `${channelId}-${threadRootId || 'channel'}`;
+    const loadKey = `${channelId}-channel`;
     
     if (loadedRef.current !== loadKey && loadMessagesRef.current) {
-      // Reset state for new channel/thread
+      // Reset state for new channel
       setMessages([]);
       setError(null);
       setHasMoreMessages(true);
@@ -1452,7 +1147,7 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
       // Use the ref to avoid dependency issues
       loadMessagesRef.current();
     }
-  }, [channelId, threadRootId]); // Only depend on channelId and threadRootId
+  }, [channelId]);
 
   // Enhanced cleanup for typing indicators with stale user removal
   useEffect(() => {
@@ -1538,17 +1233,11 @@ export const useMessages = (channelId: string, threadRootId?: string) => {
     loadMoreMessages,
     startTyping,
     stopTyping,
-    createThread,
-    updateThreadInfo,
     forceReconnect,
     // Connection state
     connectionState: webSocketService.getConnectionState(),
     reconnectionInfo: webSocketService.getReconnectionInfo(),
     isConnected: webSocketService.isConnected(),
-    // Thread state getters
-    threadCache,
-    threadInfoCache,
-    activeThreads,
     // Message state getters
     optimisticMessages,
     failedMessages,

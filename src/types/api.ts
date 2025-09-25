@@ -35,7 +35,6 @@ export interface ApiMessage {
     role: string;
   };
   message_type: 'text' | 'voice' | 'file' | 'system';
-  thread_root_id?: string;
   reply_to_id?: string;
   reply_to?: {
     id: string;
@@ -76,56 +75,8 @@ export interface ApiMessage {
   is_edited?: boolean;
   edited_at?: string;
   deleted_at?: string;
-  is_thread_root?: boolean;
-  thread_info?: {
-    reply_count: number;
-    last_reply_at?: string;
-    last_reply_by_details?: {
-      id: string;
-      name: string;
-      email: string;
-      avatar_url?: string;
-    };
-    participant_details?: Array<{
-      id: string;
-      name: string;
-      email: string;
-      avatar_url?: string;
-    }>;
-  };
   reply_count?: number;
   last_reply_timestamp?: string;
-}
-
-// Thread API Types
-export interface ApiThreadDetails {
-  thread_root_id: string;
-  reply_count: number;
-  last_reply_at?: string;
-  last_reply_by_details?: {
-    id: string;
-    name: string;
-    email: string;
-    avatar_url?: string;
-  };
-  participant_details: Array<{
-    id: string;
-    name: string;
-    email: string;
-    avatar_url?: string;
-  }>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ApiThreadRepliesResponse {
-  thread_root_id: string;
-  replies: ApiMessage[];
-  pagination: {
-    limit: number;
-    offset: number;
-    has_more: boolean;
-  };
 }
 
 // Reaction API Types
@@ -164,7 +115,6 @@ export interface SendMessageRequest {
   content: string;
   message_type?: 'text' | 'voice' | 'file' | 'system';
   reply_to_id?: string;
-  thread_root_id?: string;
   mentions?: string[];
   attachments?: Array<{
     file_id: string;
@@ -177,19 +127,6 @@ export interface SendMessageRequest {
     transcript?: string;
     voice_file_id?: string;
   };
-  metadata?: Record<string, any>;
-}
-
-export interface AddThreadReplyRequest {
-  content: string;
-  message_type?: 'text' | 'voice' | 'file';
-  attachments?: Array<{
-    file_id: string;
-    filename: string;
-    file_type: string;
-    file_size: number;
-  }>;
-  reply_to_id?: string;
   metadata?: Record<string, any>;
 }
 

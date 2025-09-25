@@ -23,11 +23,8 @@ export interface Message {
   deletedBy?: string; // Name of user who deleted the message
   deletedAt?: Date; // When the message was deleted
   
-  // Threading support
+  // Reply support
   connectedTo?: string; // reply_to - immediate parent message ID
-  threadRoot?: string; // thread_root - root message of the thread
-  replyCount?: number; // Number of replies in this thread
-  lastReplyTimestamp?: Date; // Timestamp of last reply
   
   aiSummary?: string;
   taskAssignments?: TaskAssignment[];

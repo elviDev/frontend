@@ -16,7 +16,6 @@ import Feather from 'react-native-vector-icons/Feather';
 import { Avatar } from '../common/Avatar';
 import { MessageReactions } from './MessageReactions';
 import { MessageAttachments } from './MessageAttachments';
-import { ThreadPreview } from './ThreadPreview';
 import type { Message, MessageContextMenuAction } from '../../types/message';
 
 interface MessageProps {
@@ -28,7 +27,6 @@ interface MessageProps {
   onEdit?: (message: Message) => void;
   onDelete?: (messageId: string) => void;
   onReaction?: (messageId: string, emoji: string) => void;
-  onThreadOpen?: (message: Message) => void;
   onUserPress?: (userId: string) => void;
 }
 
@@ -41,7 +39,6 @@ export const Message: React.FC<MessageProps> = ({
   onEdit,
   onDelete,
   onReaction,
-  onThreadOpen,
   onUserPress,
 }) => {
   // Always call hooks at the top, before any conditional logic
@@ -226,13 +223,6 @@ export const Message: React.FC<MessageProps> = ({
             <MessageAttachments attachments={message.attachments} />
           )}
 
-          {/* Thread Preview */}
-          {message.isThreadRoot && message.threadInfo && message.threadInfo.replyCount > 0 && (
-            <ThreadPreview
-              threadInfo={message.threadInfo}
-              onPress={() => onThreadOpen?.(message)}
-            />
-          )}
 
           {/* Reactions */}
           {message.reactions.length > 0 && (
@@ -297,19 +287,6 @@ export const Message: React.FC<MessageProps> = ({
                 </TouchableOpacity>
               )}
 
-              {/* Thread Button (only for non-thread messages) */}
-              {!message.threadRootId && (
-                <TouchableOpacity
-                  onPress={() => {
-                    onThreadOpen?.(message);
-                    setShowActions(false);
-                  }}
-                  className="flex-row items-center bg-green-100 px-3 py-2 rounded-full mr-2"
-                >
-                  <MaterialIcon name="forum" size={16} color="#059669" />
-                  <Text className="ml-1 text-green-600 text-sm font-medium">Thread</Text>
-                </TouchableOpacity>
-              )}
             </View>
           )}
 

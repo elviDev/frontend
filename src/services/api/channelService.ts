@@ -52,7 +52,6 @@ export interface Message {
   transcription?: string;
   attachments: any[];
   reply_to?: string;
-  thread_root?: string;
   is_edited: boolean;
   is_pinned: boolean;
   is_announcement: boolean;
@@ -408,7 +407,6 @@ class ChannelService {
     limit: number = 50, 
     offset: number = 0,
     options?: {
-      threadRoot?: string;
       search?: string;
       messageType?: string;
       before?: string;
@@ -420,7 +418,6 @@ class ChannelService {
       offset: offset.toString(),
     });
 
-    if (options?.threadRoot) queryParams.set('thread_root', options.threadRoot);
     if (options?.search) queryParams.set('search', options.search);
     if (options?.messageType) queryParams.set('message_type', options.messageType);
     if (options?.before) queryParams.set('before', options.before);
@@ -495,22 +492,6 @@ class ChannelService {
     return response;
   }
 
-  async addMessageReply(
-    channelId: string,
-    messageId: string,
-    replyData: {
-      content: string;
-      message_type?: 'text' | 'voice' | 'file';
-      attachments?: any[];
-      mentions?: string[];
-    }
-  ): Promise<Message> {
-    const response = await this.makeRequest<ApiResponse<Message>>(`/channels/${channelId}/messages/${messageId}/thread`, {
-      method: 'POST',
-      body: JSON.stringify(replyData),
-    });
-    return response.data;
-  }
 
   async editMessageReply(
     channelId: string,

@@ -6,7 +6,13 @@
       "Bash(npx tsc:*)",
       "Bash(npm start:*)",
       "Bash(taskkill:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(ping:*)",
+      "Bash(nslookup:*)",
+      "Bash(./gradlew:*)",
+      "Bash(echo:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
