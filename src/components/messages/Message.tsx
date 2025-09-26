@@ -83,13 +83,24 @@ export const Message: React.FC<MessageProps> = ({
     if (!timestamp) {
       return 'Invalid time';
     }
-    
+
     try {
       const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-      if (isNaN(date.getTime())) {
+
+      // More comprehensive date validation
+      if (isNaN(date.getTime()) || date.getTime() < 0) {
         return 'Invalid time';
       }
-      
+
+      // Additional validation for reasonable date ranges
+      const now = new Date();
+      const hundredYearsAgo = new Date(now.getFullYear() - 100, 0, 1);
+      const hundredYearsFromNow = new Date(now.getFullYear() + 100, 0, 1);
+
+      if (date < hundredYearsAgo || date > hundredYearsFromNow) {
+        return 'Invalid time';
+      }
+
       if (isToday(date)) {
         return format(date, 'HH:mm');
       } else if (isYesterday(date)) {

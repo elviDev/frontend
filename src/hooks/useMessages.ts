@@ -68,10 +68,9 @@ export const useMessages = (channelId: string) => {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   
   // Production-grade state management
-  const [optimisticMessages, setOptimisticMessages] = useState<Set<string>>(new Set());
-  const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
   const [editingMessages, setEditingMessages] = useState<Set<string>>(new Set());
   const [deletingMessages, setDeletingMessages] = useState<Set<string>>(new Set());
+  const [messageIds, setMessageIds] = useState<Set<string>>(new Set());
   
   // Enhanced pagination state with proper cursor-based pagination
   const [pagination, setPagination] = useState({
@@ -106,41 +105,29 @@ export const useMessages = (channelId: string) => {
     };
   }, []);
 
-  // Enhanced deduplication with conflict resolution
-  const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
-    const messageMap = new Map<string, Message>();
-    const seen = new Set<string>();
-    
-    msgs.forEach(msg => {
-      // Skip null/undefined messages or messages without IDs
-      if (!msg || !msg.id) {
-        return;
-      }
-      
-      if (seen.has(msg.id)) {
-        // Conflict resolution: prefer non-optimistic over optimistic
-        const existing = messageMap.get(msg.id);
-        if (existing?.isOptimistic && !msg.isOptimistic) {
-          messageMap.set(msg.id, normalizeMessage(msg));
-        }
-        return;
-      }
-      
-      seen.add(msg.id);
-      messageMap.set(msg.id, normalizeMessage(msg));
-    });
-    
-    return Array.from(messageMap.values());
-  }, [normalizeMessage]);
-
-
-  // Smart message state updater with deduplication
+  // Message state updater with ID-based deduplication
   const updateMessages = useCallback((updater: (prev: Message[]) => Message[]) => {
     setMessages(prev => {
       const updated = updater(prev);
-      return deduplicateMessages(updated);
+      const normalized = updated.map(normalizeMessage);
+
+      // Filter out messages with duplicate IDs
+      const deduplicatedMessages: Message[] = [];
+      const seenIds = new Set<string>();
+
+      normalized.forEach(msg => {
+        if (msg && msg.id && !seenIds.has(msg.id)) {
+          seenIds.add(msg.id);
+          deduplicatedMessages.push(msg);
+        }
+      });
+
+      // Update the messageIds Set
+      setMessageIds(seenIds);
+
+      return deduplicatedMessages;
     });
-  }, [deduplicateMessages]);
+  }, [normalizeMessage]);
 
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadedRef = useRef<string>('');
@@ -192,7 +179,7 @@ export const useMessages = (channelId: string) => {
           const sortedMessages = messagesArray.sort((a, b) => 
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
-          setMessages(deduplicateMessages(sortedMessages));
+          setMessages(sortedMessages);
           const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
           setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
           
@@ -272,7 +259,7 @@ export const useMessages = (channelId: string) => {
         setIsLoading(false);
       }
     }
-  }, [channelId, deduplicateMessages]);
+  }, [channelId]);
 
   // Store loadMessages in ref for stable reference in useEffect
   loadMessagesRef.current = loadMessages;
@@ -367,61 +354,8 @@ export const useMessages = (channelId: string) => {
   ]);
 
   const sendMessage = useCallback(async (params: SendMessageParams, retryCount = 0): Promise<Message | undefined> => {
-    
-    const optimisticId = `optimistic_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-    
-    // Create optimistic message for immediate UI feedback using backend format
-    const optimisticMessage: Message = {
-      id: optimisticId,
-      channel_id: channelId,
-      task_id: null,
-      user_id: currentUser?.id || 'current-user',
-      content: params.content,
-      message_type: params.type === 'image' ? 'file' : params.type,
-      voice_data: null,
-      transcription: null,
-      attachments: {},
-      reply_to: params.replyTo,
-      thread_root: null,
-      is_edited: false,
-      is_pinned: false,
-      is_announcement: false,
-      reactions: [],
-      mentions: [],
-      ai_generated: false,
-      ai_context: null,
-      command_execution_id: null,
-      metadata: {},
-      formatting: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      edited_at: null,
-      version: 1,
-      deleted_at: null,
-      deleted_by: null,
-      thread_root_id: null,
-      reply_to_id: params.replyTo?.id || null,
-      is_thread_root: false,
-      user_name: currentUser?.name || 'Current User',
-      user_email: currentUser?.email || '',
-      user_avatar: currentUser?.avatar_url || null,
-      user_role: currentUser?.role || 'member',
-      thread_info: null,
-      reply_count: 0,
-      last_reply_timestamp: null,
-      deleted_by_name: null,
-      isOptimistic: true,
-      isSending: true,
-    };
-
-    // Track optimistic message
-    setOptimisticMessages(prev => new Set([...Array.from(prev), optimisticId]));
-
-    // Add optimistic message at the end (newest messages last)
-    updateMessages(prev => [...prev, optimisticMessage]);
-
     try {
-      // Send as channel message  
+      // Send message directly without optimistic updates
       const response = await messageService.sendMessage(channelId, {
         content: params.content,
         message_type: params.type === 'image' ? 'file' : (params.type as 'text' | 'voice' | 'file' | 'system'),
@@ -434,80 +368,33 @@ export const useMessages = (channelId: string) => {
         })),
       });
 
-      if (response.success && response.data) {
-        // Replace optimistic message with real message from API (no transformation needed)
-        const realMessage = response.data as Message;
-        
-        updateMessages(prev => prev.map(msg => 
-          msg.id === optimisticId ? realMessage : msg
-        ));
-        
+      if (response.success) {
         showSuccess('Message sent!');
-        
-        return realMessage;
-      } else if (response.success && !response.data) {
-        // Success but no data returned - keep optimistic message as final
-        updateMessages(prev => prev.map(msg => 
-          msg.id === optimisticId 
-            ? { ...msg, isOptimistic: false, isSending: false }
-            : msg
-        ));
-        showSuccess('Message sent!');
-        return undefined;
+        return response.data as Message;
       } else {
         throw new Error((response as any).error?.message || 'Failed to send message');
       }
     } catch (err: any) {
       console.error('❌ Failed to send message:', err);
-      
+
       // Enhanced error handling with retry capability
       const shouldRetry = retryCount < 2 && (
         err.name === 'TypeError' && err.message.includes('Network request failed') ||
         err.error?.statusCode >= 500
       );
-      
+
       if (shouldRetry) {
-        // Update message to show retry state
-        updateMessages(prev => prev.map(msg => 
-          msg.id === optimisticId 
-            ? { ...msg, sendError: `Retrying... (${retryCount + 1}/3)` }
-            : msg
-        ));
-        
         // Wait before retry with exponential backoff
         await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-        
         return sendMessage(params, retryCount + 1);
       }
-      
-      // Mark message as failed after all retries
-      updateMessages(prev => prev.map(msg => 
-        msg.id === optimisticId 
-          ? { 
-              ...msg, 
-              isSending: false, 
-              sendError: err.error?.message || err.message || 'Failed to send',
-              hasFailed: true
-            }
-          : msg
-      ));
-      
-      // Add to failed messages set
-      setFailedMessages(prev => new Set([...Array.from(prev), optimisticId]));
-      
+
       const errorMessage = err.error?.message || err.message || 'Failed to send message';
       showError(`Failed to send message: ${errorMessage}`);
-      
+
       throw err;
-    } finally {
-      // Remove from optimistic messages set
-      setOptimisticMessages(prev => {
-        const updated = new Set(prev);
-        updated.delete(optimisticId);
-        return updated;
-      });
     }
-  }, [showSuccess, showError, currentUser, channelId, updateMessages]);
+  }, [showSuccess, showError, channelId]);
 
   const editMessage = useCallback(async (messageId: string, content: string, retryCount = 0): Promise<void> => {
     const originalMessage = messages.find(m => m.id === messageId);
@@ -576,8 +463,6 @@ export const useMessages = (channelId: string) => {
         msg.id === messageId ? { ...originalMessage, isBeingEdited: false } : msg
       ));
       
-      // Add to failed messages set
-      setFailedMessages(prev => new Set([...Array.from(prev), messageId]));
       
       const errorMessage = err.error?.message || err.message || 'Failed to edit message';
       showError(`Failed to edit message: ${errorMessage}`);
@@ -653,8 +538,6 @@ export const useMessages = (channelId: string) => {
         msg.id === messageId ? { ...originalMessage, isBeingDeleted: false } : msg
       ));
       
-      // Add to failed messages set
-      setFailedMessages(prev => new Set([...Array.from(prev), messageId]));
       
       const errorMessage = err.error?.message || err.message || 'Failed to delete message';
       showError(`Failed to delete message: ${errorMessage}`);
@@ -868,33 +751,35 @@ export const useMessages = (channelId: string) => {
 
     // Message events
     const handleMessageSent = (data: WebSocketMessageEvent) => {
-      
+      console.log('🔥 WebSocket message_sent event received:', {
+        eventChannelId: data.channelId || data.channel_id,
+        currentChannelId: channelId,
+        messageId: data.message?.id || data.data?.id,
+        messageContent: data.message?.content || data.data?.content,
+        fullData: data
+      });
+
       // Handle both channelId and channel_id formats
       const eventChannelId = data.channelId || data.channel_id;
-      
+
       if (eventChannelId === channelId) {
         // Validate that message data exists - handle different data structures
-        let messageData = data.message || data.data;
+        let messageData = data.data?.message || data.message;
         if (!messageData) {
           return;
         }
-        
+
         try {
-          
-          // New message in current channel (no transformation needed)
+          // New message in current channel - check for duplicates before adding
           const newMessage = messageData as Message;
-          // Use updateMessages instead of setMessages to ensure deduplication
           updateMessages(prev => {
-            // Check if this message already exists (avoid duplicates from optimistic updates)
-            const existingIndex = prev.findIndex(msg => msg.id === newMessage.id);
-            
-            if (existingIndex >= 0) {
-              // Replace existing message (could be optimistic)
-              return prev.map(msg => msg.id === newMessage.id ? newMessage : msg);
-            } else {
-              // Add new message
-              return [...prev, newMessage];
+            // Check if message already exists
+            const messageExists = prev.some(msg => msg.id === newMessage.id);
+            if (messageExists) {
+              console.log('Duplicate message detected, skipping:', newMessage.id);
+              return prev;
             }
+            return [...prev, newMessage];
           });
         } catch (error) {
           console.error('Error processing message_sent event:', error);
@@ -905,7 +790,7 @@ export const useMessages = (channelId: string) => {
     const handleMessageUpdated = (data: WebSocketMessageEvent & { messageId: string }) => {
       if (data.channelId === channelId) {
         // Validate that message data exists - handle different data structures
-        let messageData = data.message || (data as any).data;
+        let messageData = (data as any).data?.message || data.message;
         if (!messageData) {
           return;
         }
@@ -1039,10 +924,7 @@ export const useMessages = (channelId: string) => {
             }) as Message[]; // No transformation needed
           
           if (syncedMessages.length > 0) {
-            updateMessages(prev => {
-              const combined = [...syncedMessages, ...prev];
-              return deduplicateMessages(combined);
-            });
+            updateMessages(prev => [...syncedMessages, ...prev]);
           }
         }
         
@@ -1086,7 +968,7 @@ export const useMessages = (channelId: string) => {
       // Leave channel
       webSocketService.leaveChannel(channelId);
     };
-  }, [channelId, currentUser, deduplicateMessages, updateMessages]);
+  }, [channelId, currentUser, updateMessages]);
 
   // Load initial messages when channel changes
   useEffect(() => {
@@ -1095,9 +977,10 @@ export const useMessages = (channelId: string) => {
     if (loadedRef.current !== loadKey && loadMessagesRef.current) {
       // Reset state for new channel
       setMessages([]);
+      setMessageIds(new Set());
       setError(null);
       setHasMoreMessages(true);
-      
+
       // Reset pagination state
       setPagination({
         offset: 0,
@@ -1203,9 +1086,8 @@ export const useMessages = (channelId: string) => {
     reconnectionInfo: webSocketService.getReconnectionInfo(),
     isConnected: webSocketService.isConnected(),
     // Message state getters
-    optimisticMessages,
-    failedMessages,
     editingMessages,
     deletingMessages,
   };
 };
+
