@@ -492,19 +492,6 @@ export const useMessages = (channelId: string) => {
     // Mark as being deleted
     setDeletingMessages(prev => new Set([...Array.from(prev), messageId]));
 
-    // Optimistically mark as deleted with loading state
-    const optimisticMessage = {
-      ...originalMessage,
-      isDeleted: true,
-      deletedAt: new Date(),
-      content: '',
-      isBeingDeleted: true,
-    };
-
-    updateMessages(prev => prev.map(msg => 
-      msg.id === messageId ? optimisticMessage : msg
-    ));
-
     try {
       const response = await messageService.deleteMessage(channelId, messageId);
       

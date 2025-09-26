@@ -18,8 +18,6 @@ import { useToast } from '../../contexts/ToastContext';
 import { RootState } from '../../store/store';
 import type { Message } from '../../types/message';
 import type { MainStackParamList } from '../../navigation/MainNavigator';
-import { channelService } from '../../services/api/channelService';
-import { id } from 'date-fns/locale';
 
 type ChannelDetailScreenProps = NativeStackScreenProps<MainStackParamList, 'ChannelDetailScreen'>;
 
