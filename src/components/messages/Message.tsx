@@ -3,12 +3,9 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Image,
   Animated,
   Pressable,
   Alert,
-  ActionSheetIOS,
-  Platform,
 } from 'react-native';
 import { format, isToday, isYesterday } from 'date-fns';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
@@ -16,15 +13,16 @@ import Feather from 'react-native-vector-icons/Feather';
 import { Avatar } from '../common/Avatar';
 import { MessageReactions } from './MessageReactions';
 import { MessageAttachments } from './MessageAttachments';
-import type { Message, MessageContextMenuAction } from '../../types/message';
+import { EmojiPicker } from './EmojiPicker';
+import type { Message as MessageType } from '../../types/message';
 
 interface MessageProps {
-  message: Message;
+  message: MessageType;
   currentUserId: string;
   showAvatar?: boolean;
   isGrouped?: boolean;
-  onReply?: (message: Message) => void;
-  onEdit?: (message: Message) => void;
+  onReply?: (message: MessageType) => void;
+  onEdit?: (message: MessageType) => void;
   onDelete?: (messageId: string) => void;
   onReaction?: (messageId: string, emoji: string) => void;
   onUserPress?: (userId: string) => void;
@@ -43,6 +41,7 @@ export const Message: React.FC<MessageProps> = ({
 }) => {
   // Always call hooks at the top, before any conditional logic
   const [showActions, setShowActions] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const scaleValue = useRef(new Animated.Value(1)).current;
   
   // Early return for null/undefined messages
@@ -51,7 +50,7 @@ export const Message: React.FC<MessageProps> = ({
   }
   
   // Early return for deleted messages BEFORE other state calculations
-  if (message.isDeleted) {
+  if (message.deleted_at) {
     return (
       <View className="px-4 py-2">
         <View className="flex-row items-center opacity-50">
@@ -66,27 +65,20 @@ export const Message: React.FC<MessageProps> = ({
         </View>
       </View>
     );
+  }``
+
+  console.log('Rendering message:', message.id, message);
+  // Handle missing user_details gracefully
+  const userDetails = {
+    id: message.user_id,
+    name: message.user_name || 'Unknown User',
+    avatar_url: message.user_avatar || undefined,
+    role: message.user_role || undefined,
   }
+  const isOwnMessage = userDetails?.id === currentUserId;
+  const canEdit = isOwnMessage && !message.deleted_at;
+  const canDelete = isOwnMessage && !message.deleted_at;
 
-  const isOwnMessage = message.sender.id === currentUserId;
-  const canEdit = isOwnMessage && !message.isDeleted;
-  const canDelete = isOwnMessage && !message.isDeleted;
-
-  // Get user information with proper fallback to user_details
-  const getUserInfo = () => {
-    // Prefer user_details from API, fallback to sender
-    const userDetails = message.user_details || message.sender;
-    return {
-      id: userDetails.id,
-      name: userDetails.name,
-      email: userDetails.email,
-      avatar: userDetails.avatar, // This should contain avatar_url from API
-      role: userDetails.role,
-      isOnline: userDetails.isOnline,
-    };
-  };
-
-  const userInfo = getUserInfo();
 
   const formatTime = (timestamp: Date | null | undefined) => {
     if (!timestamp) {
@@ -113,7 +105,7 @@ export const Message: React.FC<MessageProps> = ({
   };
 
   const handleLongPress = () => {
-    if (message.isDeleted) return;
+    if (message.deleted_at) return;
     
     // Show action buttons on the side instead of ActionSheet
     setShowActions(!showActions);
@@ -158,9 +150,15 @@ export const Message: React.FC<MessageProps> = ({
         {/* Avatar */}
         <View className="w-10 mr-3">
           {showAvatar && !isGrouped ? (
-            <TouchableOpacity onPress={() => onUserPress?.(userInfo.id)}>
+            <TouchableOpacity onPress={() => onUserPress?.(userDetails.id)}>
               <Avatar
-                user={userInfo}
+                user={{
+                  id: userDetails.id,
+                  name: userDetails.name,
+                  avatar: userDetails.avatar_url || userDetails.name.charAt(0).toUpperCase()!,
+                  role: userDetails.role,
+                  isOnline: userDetails.id === currentUserId
+                }}
                 size="sm"
                 showOnlineStatus={true}
               />
@@ -173,22 +171,22 @@ export const Message: React.FC<MessageProps> = ({
           {/* Header */}
           {!isGrouped && (
             <View className="flex-row items-center mb-1">
-              <TouchableOpacity onPress={() => onUserPress?.(userInfo.id)}>
+              <TouchableOpacity onPress={() => onUserPress?.(userDetails.id)}>
                 <Text className="font-semibold text-gray-900 text-base">
-                  {userInfo.name}
+                  {userDetails.name}
                 </Text>
               </TouchableOpacity>
-              {userInfo.role && (
+              {userDetails.role && (
                 <View className="ml-2 px-2 py-0.5 bg-blue-100 rounded-full">
                   <Text className="text-blue-700 text-xs font-medium">
-                    {userInfo.role}
+                    {userDetails.role}
                   </Text>
                 </View>
               )}
               <Text className="ml-2 text-gray-500 text-sm">
-                {formatTime(message.timestamp)}
+                {formatTime(new Date(message.created_at))}
               </Text>
-              {message.isEdited && (
+              {message.is_edited && (
                 <Text className="ml-1 text-gray-400 text-xs">
                   (edited)
                 </Text>
@@ -197,16 +195,16 @@ export const Message: React.FC<MessageProps> = ({
           )}
 
           {/* Reply Reference */}
-          {message.replyTo && (
+          {message.reply_to && (
             <View className="mb-2 pl-3 border-l-2 border-gray-300 bg-gray-50 rounded-r-lg p-2">
               <Text className="text-gray-600 text-xs font-medium">
-                Replying to {message.replyTo.sender.name}
+                Replying to {message.reply_to.user_details?.name || message.reply_to.sender?.name || 'Someone'}
               </Text>
               <Text 
                 className="text-gray-700 text-sm mt-0.5" 
                 numberOfLines={2}
               >
-                {message.replyTo.content}
+                {message.reply_to.content}
               </Text>
             </View>
           )}
@@ -219,13 +217,13 @@ export const Message: React.FC<MessageProps> = ({
           </View>
 
           {/* Attachments */}
-          {message.attachments && message.attachments.length > 0 && (
-            <MessageAttachments attachments={message.attachments} />
+          {message.attachments && Object.keys(message.attachments).length > 0 && (
+            <MessageAttachments attachments={Object.values(message.attachments)} />
           )}
 
 
           {/* Reactions */}
-          {message.reactions.length > 0 && (
+          {message.reactions && message.reactions.length > 0 && (
             <MessageReactions
               reactions={message.reactions}
               onReactionPress={handleReactionPress}
@@ -246,6 +244,18 @@ export const Message: React.FC<MessageProps> = ({
               >
                 <Feather name="corner-up-left" size={16} color="#3B82F6" />
                 <Text className="ml-1 text-blue-600 text-sm font-medium">Reply</Text>
+              </TouchableOpacity>
+
+              {/* React Button */}
+              <TouchableOpacity
+                onPress={() => {
+                  setShowEmojiPicker(true);
+                  setShowActions(false);
+                }}
+                className="flex-row items-center bg-yellow-100 px-3 py-2 rounded-full mr-2"
+              >
+                <Text className="text-yellow-600 text-base">😀</Text>
+                <Text className="ml-1 text-yellow-600 text-sm font-medium">React</Text>
               </TouchableOpacity>
 
               {/* Edit Button (only for own messages) */}
@@ -306,6 +316,20 @@ export const Message: React.FC<MessageProps> = ({
           )}
         </View>
       </Pressable>
+
+      {/* Emoji Picker Modal */}
+      <EmojiPicker
+        visible={showEmojiPicker}
+        onClose={() => setShowEmojiPicker(false)}
+        onEmojiSelect={(emoji) => {
+          try {
+            console.log('💬 Message: Emoji selected for message:', message.id, emoji);
+            onReaction?.(message.id, emoji);
+          } catch (error) {
+            console.error('🚨 Message: Error calling onReaction:', error);
+          }
+        }}
+      />
     </Animated.View>
   );
 };

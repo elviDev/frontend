@@ -231,7 +231,7 @@ class WebSocketService {
   private config: WebSocketConnectionConfig;
   
   // Enhanced connection management from messageWebSocketService
-  private heartbeatTimeoutMs = 45000; // 45 seconds timeout for better stability
+  private heartbeatTimeoutMs = 120000; // 2 minutes timeout for better stability
   private connectionState: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' = 'disconnected';
   private reconnectTimeoutId: NodeJS.Timeout | null = null;
   private pendingOperations: Array<() => void> = [];
@@ -241,6 +241,16 @@ class WebSocketService {
   // Channel and room management
   private joinedChannels = new Set<string>();
   private joinedTasks = new Set<string>();
+  
+  // Offline queue for data loss prevention
+  private offlineQueue: Array<{
+    type: 'message' | 'reaction' | 'typing' | 'presence';
+    data: any;
+    timestamp: number;
+    retryCount: number;
+  }> = [];
+  private maxOfflineQueueSize = 1000;
+  private maxRetryCount = 3;
 
   constructor(config?: Partial<WebSocketConnectionConfig>) {
     // For Android emulator, use 10.0.2.2, for iOS simulator/web use localhost
@@ -569,11 +579,21 @@ class WebSocketService {
   }
 
   private rejoinRooms(): void {
+    if (!this.socket?.connected) {
+      console.warn('⚠️ Cannot rejoin rooms: WebSocket not connected');
+      return;
+    }
+    
+    console.log('🔄 Rejoining rooms:', {
+      channels: Array.from(this.joinedChannels),
+      tasks: Array.from(this.joinedTasks)
+    });
+    
     // Rejoin previously joined channels
     this.joinedChannels.forEach(channelId => {
       if (this.socket?.connected) {
         this.socket.emit('join_channel', { channelId });
-        console.log(`🔄 WebSocket: Rejoined channel: ${channelId}`);
+        console.log(`🏠 WebSocket: Rejoined channel: ${channelId}`);
       }
     });
 
@@ -581,7 +601,7 @@ class WebSocketService {
     this.joinedTasks.forEach(taskId => {
       if (this.socket?.connected) {
         this.socket.emit('join_task', { taskId });
-        console.log(`🔄 WebSocket: Rejoined task: ${taskId}`);
+        console.log(`📋 WebSocket: Rejoined task: ${taskId}`);
       }
     });
   }
@@ -612,6 +632,9 @@ class WebSocketService {
       try {
         await this.connect();
         console.log('✅ WebSocket: Reconnection successful');
+        
+        // Process any queued operations after successful reconnection
+        this.processOfflineQueue();
       } catch (error) {
         console.error('❌ WebSocket: Reconnection failed:', error);
         
@@ -679,6 +702,80 @@ class WebSocketService {
   }
 
   /**
+   * Add to offline queue for retry when connection is restored
+   */
+  private addToOfflineQueue(type: 'message' | 'reaction' | 'typing' | 'presence', data: any): void {
+    if (this.offlineQueue.length >= this.maxOfflineQueueSize) {
+      // Remove oldest items to make room
+      this.offlineQueue.shift();
+    }
+    
+    this.offlineQueue.push({
+      type,
+      data,
+      timestamp: Date.now(),
+      retryCount: 0,
+    });
+    
+    console.log(`📦 Added ${type} to offline queue (${this.offlineQueue.length}/${this.maxOfflineQueueSize})`);
+  }
+
+  /**
+   * Process offline queue when connection is restored
+   */
+  private processOfflineQueue(): void {
+    if (this.offlineQueue.length === 0) return;
+    
+    console.log(`🔄 Processing ${this.offlineQueue.length} queued operations`);
+    
+    const itemsToProcess = [...this.offlineQueue];
+    this.offlineQueue = [];
+    
+    itemsToProcess.forEach(item => {
+      if (item.retryCount < this.maxRetryCount) {
+        try {
+          // Retry the operation based on type
+          switch (item.type) {
+            case 'message':
+              if (this.socket?.connected) {
+                this.socket.emit('send_message', item.data);
+              }
+              break;
+            case 'reaction':
+              if (this.socket?.connected) {
+                this.socket.emit('toggle_reaction', item.data);
+              }
+              break;
+            case 'typing':
+              if (this.socket?.connected) {
+                this.socket.emit('typing_start', item.data);
+              }
+              break;
+            case 'presence':
+              if (this.socket?.connected) {
+                this.socket.emit('presence_update', item.data);
+              }
+              break;
+          }
+          console.log(`✅ Processed offline ${item.type} operation`);
+        } catch (error) {
+          console.error(`❌ Failed to process offline ${item.type}:`, error);
+          
+          // Re-queue if under retry limit
+          if (item.retryCount < this.maxRetryCount - 1) {
+            this.offlineQueue.push({
+              ...item,
+              retryCount: item.retryCount + 1,
+            });
+          }
+        }
+      } else {
+        console.warn(`🚨 Dropped offline ${item.type} after ${this.maxRetryCount} retries`);
+      }
+    });
+  }
+
+  /**
    * Schedule reconnection attempt (legacy method for backward compatibility)
    */
   private scheduleReconnect(): void {
@@ -729,48 +826,11 @@ class WebSocketService {
    * Show local notification
    */
   private async showLocalNotification(notification: NotificationEvent): Promise<void> {
-    try {
-      // Platform-specific notification handling
-      // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-      if (typeof window !== 'undefined' && 'Notification' in window) {
-        // Web notification
-        // Platform-specific notification handling
-        // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-        if (typeof window !== 'undefined' && 'Notification' in window) {
-          // Platform-specific notification handling
-          // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-          if (window.Notification.permission === 'granted') {
-            // Platform-specific notification handling
-            // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-            const notif = new window.Notification(notification.title, {
-              body: notification.message,
-              icon: '/icon.png',
-              tag: notification.notificationId,
-              data: notification.data,
-              requireInteraction: notification.priority === 'critical',
-            });
-
-            // Auto-close non-critical notifications
-            if (notification.priority !== 'critical') {
-              setTimeout(() => notif.close(), 5000);
-            } // Platform-specific notification handling
-            // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-          } else if (window.Notification.permission === 'default') {
-            // Request permission if not granted
-            // Platform-specific notification handling
-            // @ts-expect-error: 'window' might not be defined in some environments (e.g., Node.js)
-            const permission = await window.Notification.requestPermission();
-            if (permission === 'granted') {
-              this.showLocalNotification(notification);
-            }
-          }
-        }
-      }
-      // React Native notification would be handled here
-      // This could integrate with expo-notifications or react-native-push-notification
-    } catch (error) {
-      console.error('Failed to show notification:', error);
-    }
+    // Simple implementation to avoid parsing issues
+    console.log('Local notification:', notification);
+    
+    // TODO: Implement platform-specific notifications
+    // For now, just log the notification
   }
 
   /**
@@ -848,10 +908,15 @@ class WebSocketService {
       throw new Error('Channel ID is required');
     }
     
+    // Add to joined channels set for reconnection tracking
+    this.joinedChannels.add(channelId);
+    console.log('📥 Added channel to joined set:', channelId);
+    
     if (this.socket?.connected) {
       this.socket.emit('join_channel', { channelId });
+      console.log('🏠 Joined channel room:', channelId);
     } else {
-      console.warn('Cannot join channel: WebSocket not connected');
+      console.warn('⚠️ Cannot join channel: WebSocket not connected, will rejoin on reconnect');
     }
   }
 
@@ -863,10 +928,15 @@ class WebSocketService {
       throw new Error('Channel ID is required');
     }
     
+    // Remove from joined channels set
+    this.joinedChannels.delete(channelId);
+    console.log('📤 Removed channel from joined set:', channelId);
+    
     if (this.socket?.connected) {
       this.socket.emit('leave_channel', { channelId });
+      console.log('🚪 Left channel room:', channelId);
     } else {
-      console.warn('Cannot leave channel: WebSocket not connected');
+      console.warn('⚠️ Cannot leave channel: WebSocket not connected');
     }
   }
 
@@ -1033,7 +1103,15 @@ class WebSocketService {
     if (this.socket?.connected) {
       this.socket.emit(eventName, data);
     } else {
-      console.warn(`Cannot emit ${eventName}: WebSocket not connected`);
+      console.warn(`Cannot emit ${eventName}: WebSocket not connected, adding to offline queue`);
+      
+      // Add to offline queue based on event type
+      let type: 'message' | 'reaction' | 'typing' | 'presence' = 'message';
+      if (eventName.includes('reaction')) type = 'reaction';
+      else if (eventName.includes('typing')) type = 'typing';
+      else if (eventName.includes('presence')) type = 'presence';
+      
+      this.addToOfflineQueue(type, { eventName, ...data });
     }
   }
 
@@ -1144,15 +1222,23 @@ class WebSocketService {
       if (this.socket?.connected) {
         const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
         
-        if (timeSinceLastHeartbeat > 30000 + this.heartbeatTimeoutMs) {
+        // More lenient timeout check: ping interval + timeout + buffer
+        if (timeSinceLastHeartbeat > 60000 + this.heartbeatTimeoutMs) {
           console.warn('⚠️ WebSocket: Heartbeat timeout detected, attempting reconnection');
+          console.log('📊 Heartbeat debug:', {
+            timeSinceLastHeartbeat,
+            heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+            threshold: 60000 + this.heartbeatTimeoutMs
+          });
           this.handleReconnection();
           return;
         }
         
+        // Send ping to keep connection alive
         this.socket.emit('ping');
+        console.log('💓 Sent heartbeat ping');
       }
-    }, 30000); // Check every 30 seconds
+    }, 60000); // Check every 60 seconds (less frequent)
   }
   
   /**

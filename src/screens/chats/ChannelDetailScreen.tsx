@@ -19,6 +19,7 @@ import { RootState } from '../../store/store';
 import type { Message } from '../../types/message';
 import type { MainStackParamList } from '../../navigation/MainNavigator';
 import { channelService } from '../../services/api/channelService';
+import { id } from 'date-fns/locale';
 
 type ChannelDetailScreenProps = NativeStackScreenProps<MainStackParamList, 'ChannelDetailScreen'>;
 
@@ -94,7 +95,7 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         replyTo: replyingTo ? {
           id: replyingTo.id,
           content: replyingTo.content,
-          sender: replyingTo.sender,
+          sender: replyingTo.user_id? {id: replyingTo.user_id, name: replyingTo.user_name, avatar: replyingTo.user_avatar, role: replyingTo.user_role} : { name: 'Unknown User' },
         } : undefined,
         attachments,
       });

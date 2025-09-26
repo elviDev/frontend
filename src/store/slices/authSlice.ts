@@ -2,6 +2,7 @@ import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import type { AuthState, User, AuthTokens, LoginCredentials, RegisterCredentials } from '../../types/auth';
 import { authService } from '../../services/api/authService';
 import { tokenManager } from '../../services/tokenManager';
+import { webSocketService } from '../../services/websocketService';
 
 const initialState: AuthState = {
   user: null,
@@ -155,6 +156,11 @@ export const authSlice = createSlice({
         state.isAuthenticated = true;
         state.isLoading = false;
         state.error = null;
+        
+        // Connect WebSocket immediately after successful login
+        webSocketService.connect().catch(error => {
+          console.error('Failed to connect WebSocket after login:', error);
+        });
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.isLoading = false;
@@ -188,6 +194,9 @@ export const authSlice = createSlice({
       state.isAuthenticated = false;
       state.isLoading = false;
       state.error = null;
+      
+      // Disconnect WebSocket on logout
+      webSocketService.disconnect();
     })
     .addCase(logoutUser.rejected, (state, action) => {
       state.user = null;
@@ -206,6 +215,11 @@ export const authSlice = createSlice({
       state.isAuthenticated = true;
       state.isLoading = false;
       state.error = null;
+      
+      // Connect WebSocket if user is authenticated (e.g., page refresh)
+      webSocketService.connect().catch(error => {
+        console.error('Failed to connect WebSocket after user verification:', error);
+      });
     })
     .addCase(getCurrentUser.rejected, (state, action) => {
       state.isLoading = false;

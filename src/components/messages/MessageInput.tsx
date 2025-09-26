@@ -72,7 +72,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         replyingTo={replyingTo ? {
           id: replyingTo.id,
           content: replyingTo.content,
-          sender: replyingTo.sender.name
+          sender: replyingTo.user_name || 'Unknown User'
         } : null}
         onCancelEdit={onCancelEdit}
         onCancelReply={onCancelReply}

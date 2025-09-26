@@ -1,96 +1,74 @@
-export interface User {
+// Backend User Details (exactly as received from API)
+export interface UserDetails {
   id: string;
   name: string;
-  email?: string;
-  avatar?: string;
-  avatar_url?: string; // API field
-  role?: string;
-  phone?: string;
-  isOnline?: boolean;
+  email: string;
+  avatar_url: string | null;
+  role: string;
+  phone: string;
 }
 
-export interface MessageReaction {
-  emoji: string;
-  users: User[];
-  count: number;
-}
-
-export interface MessageAttachment {
-  id: string;
-  file_id?: string; // API field
-  name: string;
-  filename?: string; // API field
-  url: string;
-  type: 'image' | 'file' | 'video' | 'audio';
-  file_type?: string; // API field
-  size?: number;
-  file_size?: number; // API field
-  mimeType?: string;
-}
-
-
+// Backend Message (exactly as received from API)
 export interface Message {
   id: string;
+  channel_id: string;
+  task_id: string | null;
+  user_id: string;
   content: string;
-  sender: User;
-  user_details?: User; // API field that contains the user info with avatar_url
-  user_id?: string; // API field
-  channelId: string;
-  channel_id?: string; // API field
-  task_id?: string; // API field
-  timestamp: Date;
-  created_at?: string; // API field
-  updated_at?: string; // API field
-  type: 'text' | 'image' | 'file' | 'voice' | 'system';
-  message_type?: string; // API field
-  
-  reply_to_id?: string; // API field
-  
-  // Reactions
-  reactions: MessageReaction[];
-  
-  // Attachments
-  attachments?: MessageAttachment[];
-  
-  // Status
-  isEdited?: boolean;
-  is_edited?: boolean; // API field
-  editedAt?: Date;
-  edited_at?: string; // API field
-  isDeleted?: boolean;
-  deletedAt?: Date;
-  
-  // Voice/Transcription
-  voice_data?: any; // API field
-  transcription?: string; // API field
-  
-  // Moderation
-  is_pinned?: boolean; // API field
-  is_announcement?: boolean; // API field
-  
-  // Mentions and metadata
-  mentions?: string[]; // API field
-  ai_generated?: boolean; // API field
-  ai_context?: any; // API field
-  command_execution_id?: string; // API field
-  metadata?: Record<string, any>; // API field
-  
-  // Reply reference
-  replyTo?: {
-    id: string;
-    content: string;
-    sender: User;
-  };
-  reply_to?: any; // API field
-  
-  
-  // Optimistic updates and state tracking
+  message_type: string;
+  voice_data: any;
+  transcription: string | null;
+  attachments: Record<string, any>;
+  reply_to: any;
+  thread_root: any;
+  is_edited: boolean;
+  is_pinned: boolean;
+  is_announcement: boolean;
+  reactions: any[];
+  mentions: any[];
+  ai_generated: boolean;
+  ai_context: any;
+  command_execution_id: string | null;
+  metadata: Record<string, any>;
+  formatting: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+  edited_at: string | null;
+  version: number;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  thread_root_id: string | null;
+  reply_to_id: string | null;
+  is_thread_root: boolean;
+  thread_info: any;
+  reply_count: number;
+  last_reply_timestamp: string | null;
+  deleted_by_name: string | null;
+  user_name: string;
+  user_email: string;
+  user_avatar: string | null;
+  user_role: string;
+
+  // Frontend-only fields for state management
   isOptimistic?: boolean;
   isSending?: boolean;
   sendError?: string;
   hasFailed?: boolean;
   isBeingEdited?: boolean;
   isBeingDeleted?: boolean;
+}
+
+// API Response structure
+export interface MessagesResponse {
+  success: boolean;
+  data: Message[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+  timestamp: string;
 }
 
 export interface TypingUser {

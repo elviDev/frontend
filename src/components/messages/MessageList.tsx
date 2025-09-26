@@ -75,14 +75,14 @@ export const MessageList: React.FC<MessageListProps> = ({
 
   const shouldShowDateSeparator = useCallback((currentMessage: MessageType, previousMessage?: MessageType): boolean => {
     if (!previousMessage) return true;
-    return !isSameDay(new Date(currentMessage.timestamp), new Date(previousMessage.timestamp));
+    return !isSameDay(new Date(currentMessage.created_at), new Date(previousMessage.created_at));
   }, []);
 
   const shouldGroupMessage = useCallback((currentMessage: MessageType, previousMessage?: MessageType): boolean => {
     if (!previousMessage) return false;
-    if (currentMessage.sender.id !== previousMessage.sender.id) return false;
+    if (currentMessage?.user_id !== previousMessage?.user_id) return false;
     
-    const timeDiff = new Date(previousMessage.timestamp).getTime() - new Date(currentMessage.timestamp).getTime();
+    const timeDiff = new Date(previousMessage.created_at).getTime() - new Date(currentMessage.created_at).getTime();
     return timeDiff < 300000; // 5 minutes
   }, []);
 
@@ -118,7 +118,7 @@ export const MessageList: React.FC<MessageListProps> = ({
       <View key={`message-container-${item.id}`}>
         {showDateSeparator && (
           <View key={`date-separator-${item.id}`}>
-            {renderDateSeparator(new Date(item.timestamp))}
+            {renderDateSeparator(new Date(item.created_at))}
           </View>
         )}
         <Message

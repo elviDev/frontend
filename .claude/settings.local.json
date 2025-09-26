@@ -12,7 +12,11 @@
       "Bash(nslookup:*)",
       "Bash(./gradlew:*)",
       "Bash(echo:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(npx react-native start:*)",
+      "Bash(pkill:*)",
+      "Bash(node:*)",
+      "Bash(npx react-native:*)"
     ],
     "deny": [],
     "ask": []

@@ -3,8 +3,8 @@ import { tokenManager } from './tokenManager';
 import type {
   ApiResponse,
   ApiError,
-  ApiMessage,
 } from '../types/api';
+import type { Message } from '../types/message';
 
 class MessageService {
   private readonly maxRetries = 3;
@@ -195,7 +195,7 @@ class MessageService {
       return;
     }
 
-    for (const key of this.cache.keys()) {
+    for (const key of Array.from(this.cache.keys())) {
       if (key.includes(pattern)) {
         this.cache.delete(key);
       }
@@ -247,7 +247,7 @@ class MessageService {
       before?: string;
       after?: string;
     } = {}
-  ): Promise<ApiResponse<ApiMessage[]>> {
+  ): Promise<ApiResponse<Message[]>> {
     const cacheKey = this.getCacheKey('channelMessages', { channelId, ...options });
     
     // Use shorter cache for paginated results (don't cache forever)
@@ -276,7 +276,7 @@ class MessageService {
 
         console.log('📥 Response status:', response.status, response.statusText);
         
-        const result = await this.handleResponse<ApiMessage[]>(response);
+        const result = await this.handleResponse<Message[]>(response);
         console.log('✅ MessageService: Channel messages loaded successfully', result);
         return result;
       }, 'getChannelMessages');
@@ -321,10 +321,11 @@ class MessageService {
   }
 
   async editMessage(
+    channelId: string,
     messageId: string,
     content: string
   ): Promise<ApiResponse<any>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
+    const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${messageId}`, {
       method: 'PUT',
       headers: await this.getAuthHeaders(),
       body: JSON.stringify({ content }),
@@ -340,8 +341,8 @@ class MessageService {
     return result;
   }
 
-  async deleteMessage(messageId: string): Promise<ApiResponse<any>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
+  async deleteMessage(channelId: string, messageId: string): Promise<ApiResponse<any>> {
+    const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${messageId}`, {
       method: 'DELETE',
       headers: await this.getAuthHeaders(),
     });
@@ -359,6 +360,7 @@ class MessageService {
 
   // Reaction Management
   async toggleReaction(
+    channelId: string,
     messageId: string,
     emoji: string
   ): Promise<ApiResponse<{
@@ -375,16 +377,30 @@ class MessageService {
       }>;
     }>;
   }>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}/reactions`, {
+    const url = `${API_BASE_URL}/channels/${channelId}/messages/${messageId}/reactions`;
+    const requestBody = { emoji };
+    
+    console.log('📡 MessageService toggleReaction:', {
+      url,
+      method: 'POST',
+      body: requestBody,
+      channelId,
+      messageId,
+      emoji
+    });
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: await this.getAuthHeaders(),
-      body: JSON.stringify({ emoji }),
+      body: JSON.stringify(requestBody),
     });
+    
+    console.log('📡 MessageService raw response status:', response.status, response.statusText);
 
     return this.handleResponse<any>(response);
   }
 
-  async getMessageReactions(messageId: string): Promise<ApiResponse<{
+  async getMessageReactions(channelId: string, messageId: string): Promise<ApiResponse<{
     message_id: string;
     reactions: Array<{
       emoji: string;
@@ -398,7 +414,7 @@ class MessageService {
     total_reactions: number;
     user_reactions: string[];
   }>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}/reactions`, {
+    const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${messageId}/reactions`, {
       method: 'GET',
       headers: await this.getAuthHeaders(),
     });
@@ -406,8 +422,8 @@ class MessageService {
     return this.handleResponse<any>(response);
   }
 
-  async removeAllReactions(messageId: string): Promise<ApiResponse<any>> {
-    const response = await fetch(`${API_BASE_URL}/messages/${messageId}/reactions`, {
+  async removeAllReactions(channelId: string, messageId: string): Promise<ApiResponse<any>> {
+    const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${messageId}/reactions`, {
       method: 'DELETE',
       headers: await this.getAuthHeaders(),
     });
@@ -491,7 +507,7 @@ class MessageService {
       limit?: number;
       offset?: number;
     } = {}
-  ): Promise<ApiResponse<{ replies: ApiMessage[]; pagination: any }>> {
+  ): Promise<ApiResponse<{ replies: Message[]; pagination: any }>> {
     const cacheKey = this.getCacheKey('messageReplies', { channelId, messageId, ...options });
     
     return this.getCachedOrFetch(cacheKey, async () => {
@@ -510,7 +526,7 @@ class MessageService {
         }
       );
 
-      return this.handleResponse<{ replies: ApiMessage[]; pagination: any }>(response);
+      return this.handleResponse<{ replies: Message[]; pagination: any }>(response);
     });
   }
 
