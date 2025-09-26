@@ -1,6 +1,7 @@
 import { ApiResponse } from '../../types/api';
 import { authService } from './authService';
 import { tokenManager } from '../tokenManager';
+import { API_BASE_URL } from '../../config/api';
 
 export interface FileUploadResponse {
   id: string;
@@ -52,8 +53,6 @@ class FileService {
   private readonly baseUrl: string;
 
   constructor() {
-import { API_BASE_URL } from '../../config/api';
-
     this.baseUrl = API_BASE_URL;
   }
 
@@ -132,52 +131,22 @@ import { API_BASE_URL } from '../../config/api';
     if (options?.description) formData.append('description', options.description);
 
     return authService.withAuth(async () => {
-      const xhr = new XMLHttpRequest();
-      
-      return new Promise<FileUploadResponse>((resolve, reject) => {
-        // Progress tracking
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable && options?.onProgress) {
-            const progress: FileUploadProgress = {
-              loaded: event.loaded,
-              total: event.total,
-              percentage: Math.round((event.loaded / event.total) * 100),
-            };
-            options.onProgress(progress);
-          }
-        };
+      const accessToken = await tokenManager.getCurrentToken();
 
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const response = JSON.parse(xhr.responseText);
-              resolve(response);
-            } catch (error) {
-              reject(new Error('Invalid JSON response'));
-            }
-          } else {
-            try {
-              const errorData = JSON.parse(xhr.responseText);
-              reject(new Error(errorData.error?.message || `Upload failed: ${xhr.status}`));
-            } catch {
-              reject(new Error(`Upload failed: ${xhr.status}`));
-            }
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Network error during upload'));
-        xhr.ontimeout = () => reject(new Error('Upload timeout'));
-
-        // Get auth token and set headers
-        const token = await tokenManager.getCurrentToken();
-        xhr.open('POST', `${this.baseUrl}/files/upload`);
-        if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-        }
-        
-        xhr.timeout = 300000; // 5 minutes timeout
-        xhr.send(formData);
+      const response = await fetch(`${this.baseUrl}/files/upload`, {
+        method: 'POST',
+        headers: {
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: formData,
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `Upload failed: ${response.status}`);
+      }
+
+      return response.json();
     });
   }
 

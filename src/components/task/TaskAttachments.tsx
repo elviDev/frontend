@@ -2,472 +2,250 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   ScrollView,
-  Modal,
+  TouchableOpacity,
   Alert,
-  Image,
-  Dimensions,
-  ActivityIndicator,
-  Linking,
+  RefreshControl,
 } from 'react-native';
-import { fileService, TaskAttachment, FileUploadProgress } from '../../services/api/fileService';
+import Icon from 'react-native-vector-icons/Feather';
+import { FileUpload } from '../common/FileUpload';
+import { FilePreview } from '../common/FilePreview';
+import { fileService, TaskAttachment, FileUploadResponse } from '../../services/api/fileService';
 import { useToast } from '../../contexts/ToastContext';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
-
-const { width } = Dimensions.get('window');
 
 interface TaskAttachmentsProps {
   taskId: string;
-  attachments: TaskAttachment[];
-  onAttachmentsChange: (attachments: TaskAttachment[]) => void;
-  readonly?: boolean;
-}
-
-interface UploadingFile {
-  id: string;
-  name: string;
-  progress: number;
+  editable?: boolean;
+  showUpload?: boolean;
+  maxFiles?: number;
+  style?: any;
 }
 
 export const TaskAttachments: React.FC<TaskAttachmentsProps> = ({
   taskId,
-  attachments,
-  onAttachmentsChange,
-  readonly = false,
+  editable = true,
+  showUpload = true,
+  maxFiles = 10,
+  style,
 }) => {
-  const [loading, setLoading] = useState(false);
-  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
-  const [selectedAttachment, setSelectedAttachment] = useState<TaskAttachment | null>(null);
-  const [showUploadOptions, setShowUploadOptions] = useState(false);
-  const toast = useToast();
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     loadAttachments();
   }, [taskId]);
 
-  const loadAttachments = async () => {
+  const loadAttachments = async (showRefresh = false) => {
     try {
-      setLoading(true);
+      if (showRefresh) setIsRefreshing(true);
+      else setIsLoading(true);
+
       const response = await fileService.getTaskAttachments(taskId);
-      onAttachmentsChange(response.data);
+
+      if (response.success) {
+        setAttachments(response.data);
+      }
     } catch (error) {
       console.error('Failed to load attachments:', error);
-      toast.showError((error as Error).message || 'Failed to load attachments');
+      showError('Failed to load attachments');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
-  const handleDocumentPick = async () => {
+  const handleUploadComplete = async (files: FileUploadResponse[]) => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        multiple: true,
-        copyToCacheDirectory: true,
-      });
+      const newAttachments: TaskAttachment[] = [];
 
-      if (!result.canceled && result.assets) {
-        for (const asset of result.assets) {
-          await uploadFile({
-            uri: asset.uri,
-            name: asset.name,
-            type: asset.mimeType || 'application/octet-stream',
-          });
+      for (const file of files) {
+        const response = await fileService.addTaskAttachment(taskId, file.id);
+        if (response.success) {
+          newAttachments.push(response.data);
         }
       }
-    } catch (error) {
-      toast.showError((error as Error).message || 'Failed to pick document');
-    }
-    setShowUploadOptions(false);
-  };
-  
 
-  const handleImagePick = async (useCamera: boolean = false) => {
-    try {
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: 'images',
-            quality: 0.8,
-            allowsEditing: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: 'images',
-            quality: 0.8,
-            allowsEditing: false,
-            allowsMultipleSelection: true,
-          });
-
-      if (!result.canceled && result.assets) {
-        for (const asset of result.assets) {
-          await uploadFile({
-            uri: asset.uri,
-            name: asset.fileName || `image_${Date.now()}.jpg`,
-            type: asset.mimeType || 'image/jpeg',
-          });
-        }
+      if (newAttachments.length > 0) {
+        setAttachments(prev => [...prev, ...newAttachments]);
+        showSuccess(
+          `${newAttachments.length} file${newAttachments.length > 1 ? 's' : ''} attached to task`
+        );
       }
     } catch (error) {
-      toast.showError((error as Error).message || 'Failed to pick image');
-    }
-    setShowUploadOptions(false);
-  };
-
-  const uploadFile = async (file: { uri: string; name: string; type: string }) => {
-    // Validate file
-    if (!fileService.isFileTypeSupported(file.type)) {
-      toast.showError(`${file.type} files are not supported`);
-      return;
-    }
-
-    // Start upload tracking
-    const uploadId = `upload_${Date.now()}_${Math.random()}`;
-    setUploadingFiles(prev => [
-      ...prev,
-      { id: uploadId, name: file.name, progress: 0 }
-    ]);
-
-    try {
-      const response = await fileService.uploadFile(file, {
-        taskId,
-        onProgress: (progress: FileUploadProgress) => {
-          setUploadingFiles(prev =>
-            prev.map(f =>
-              f.id === uploadId ? { ...f, progress: progress.percentage } : f
-            )
-          );
-        },
-      });
-
-      // Add as task attachment
-      await fileService.addTaskAttachment(taskId, response.id);
-
-      // Reload attachments
-      await loadAttachments();
-
-      toast.showSuccess(`${file.name} attached to task`);
-    } catch (error) {
-      toast.showError((error as Error).message || 'Upload failed');
-    } finally {
-      // Remove from uploading list
-      setUploadingFiles(prev => prev.filter(f => f.id !== uploadId));
+      console.error('Failed to attach files:', error);
+      showError('Failed to attach files to task');
+      loadAttachments();
     }
   };
 
-  const handleDeleteAttachment = async (attachment: TaskAttachment) => {
+  const handleUploadError = (error: string) => {
+    showError(error);
+  };
+
+  const handleDeleteFile = async (attachment: TaskAttachment) => {
     Alert.alert(
-      'Delete Attachment',
-      `Are you sure you want to remove "${attachment.filename}"?`,
+      'Delete File',
+      `Remove "${attachment.originalName}" from this task?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Remove',
           style: 'destructive',
           onPress: async () => {
             try {
               await fileService.removeTaskAttachment(taskId, attachment.id);
-              await loadAttachments();
-              
-              toast.showSuccess(`${attachment.filename} has been removed`);
+              setAttachments(prev => prev.filter(a => a.id !== attachment.id));
+              showSuccess('Attachment removed from task');
             } catch (error) {
-              toast.showError((error as Error).message || 'Failed to remove attachment');
+              console.error('Failed to remove attachment:', error);
+              showError('Failed to remove attachment');
+              loadAttachments();
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
-  const handleDownloadAttachment = async (attachment: TaskAttachment) => {
-    try {
-      if (attachment.downloadUrl) {
-        const supported = await Linking.canOpenURL(attachment.downloadUrl);
-        if (supported) {
-          await Linking.openURL(attachment.downloadUrl);
-          toast.showInfo(`Downloading ${attachment.filename}`);
-        } else {
-          toast.showError('Cannot open download URL');
-        }
-      } else {
-        toast.showError('Download URL not available');
-      }
-    } catch (error) {
-      toast.showError((error as Error).message || 'Download failed');
+  const renderAttachments = () => {
+    if (attachments.length === 0) {
+      return (
+        <View className="py-8 items-center">
+          <Icon name="paperclip" size={48} color="#9CA3AF" />
+          <Text className="text-gray-500 text-lg font-medium mt-4 mb-2">
+            No attachments
+          </Text>
+          <Text className="text-gray-400 text-center">
+            {showUpload && editable
+              ? 'Upload files to share documents, images, and other resources'
+              : 'This task has no attached files'
+            }
+          </Text>
+        </View>
+      );
     }
-  };
-
-  const renderAttachmentItem = (attachment: TaskAttachment) => {
-    const isImage = attachment.mimeType.startsWith('image/');
-    const fileIcon = fileService.getFileIcon(attachment.mimeType);
-    const fileSize = fileService.formatFileSize(attachment.size);
 
     return (
-      <TouchableOpacity
-        key={attachment.id}
-        className="bg-white rounded-xl p-4 mb-3 shadow-sm"
-        onPress={() => setSelectedAttachment(attachment)}
-        activeOpacity={0.7}
+      <ScrollView
+        className="flex-1"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadAttachments(true)}
+          />
+        }
       >
-        <View className="flex-row items-center">
-          {isImage && attachment.thumbnailUrl ? (
-            <Image
-              source={{ uri: attachment.thumbnailUrl }}
-              className="w-12 h-12 rounded-lg mr-3"
-              resizeMode="cover"
+        <View className="space-y-3">
+          {attachments.map((attachment) => (
+            <FilePreview
+              key={attachment.id}
+              file={attachment}
+              showActions={editable}
+              onDelete={() => handleDeleteFile(attachment)}
+              size="medium"
             />
-          ) : (
-            <View className="w-12 h-12 bg-gray-100 rounded-lg mr-3 items-center justify-center">
-              <Text className="text-2xl">{fileIcon}</Text>
-            </View>
-          )}
-
-          <View className="flex-1">
-            <Text className="text-gray-900 font-medium text-base mb-1" numberOfLines={1}>
-              {attachment.originalName}
-            </Text>
-            <Text className="text-gray-500 text-sm mb-1">{fileSize}</Text>
-            <Text className="text-gray-400 text-xs">
-              Uploaded {new Date(attachment.uploadedAt).toLocaleDateString()}
-            </Text>
-          </View>
-
-          {!readonly && (
-            <TouchableOpacity
-              onPress={() => handleDeleteAttachment(attachment)}
-              className="w-8 h-8 bg-red-50 rounded-full items-center justify-center ml-2"
-            >
-              <Text className="text-red-600 text-lg">×</Text>
-            </TouchableOpacity>
-          )}
+          ))}
         </View>
-      </TouchableOpacity>
+      </ScrollView>
     );
   };
 
-  const renderUploadingItem = (file: UploadingFile) => (
-    <View key={file.id} className="bg-blue-50 rounded-xl p-4 mb-3 border border-blue-200">
-      <View className="flex-row items-center">
-        <View className="w-12 h-12 bg-blue-100 rounded-lg mr-3 items-center justify-center">
-          <ActivityIndicator color="#3B82F6" size="small" />
-        </View>
+  const getAttachmentStats = () => {
+    const totalSize = attachments.reduce((sum, attachment) => sum + attachment.size, 0);
+    const fileTypes = new Set(attachments.map(a => fileService.getFileCategory(a.mimeType)));
 
-        <View className="flex-1">
-          <Text className="text-gray-900 font-medium text-base mb-1" numberOfLines={1}>
-            {file.name}
+    return {
+      count: attachments.length,
+      totalSize: fileService.formatFileSize(totalSize),
+      types: Array.from(fileTypes),
+    };
+  };
+
+  const stats = getAttachmentStats();
+
+  return (
+    <View className={`bg-white rounded-xl border border-gray-200 ${style || ''}`}>
+      {/* Header */}
+      <View className="flex-row items-center justify-between p-4 border-b border-gray-100">
+        <View className="flex-row items-center">
+          <Icon name="paperclip" size={20} color="#6B7280" />
+          <Text className="font-semibold text-gray-900 ml-2">
+            Attachments ({attachments.length})
           </Text>
-          <View className="flex-row items-center">
-            <Text className="text-blue-600 text-sm mr-2">Uploading... {file.progress}%</Text>
-          </View>
-          
-          {/* Progress Bar */}
-          <View className="bg-blue-200 rounded-full h-2 mt-2">
-            <View 
-              className="bg-blue-500 rounded-full h-2"
-              style={{ width: `${file.progress}%` }}
-            />
-          </View>
         </View>
+
+        {attachments.length > 0 && (
+          <TouchableOpacity
+            onPress={() => loadAttachments(true)}
+            className="p-1"
+          >
+            <Icon name="refresh-cw" size={16} color="#6B7280" />
+          </TouchableOpacity>
+        )}
       </View>
-    </View>
-  );
 
-  const renderUploadOptions = () => (
-    <Modal
-      visible={showUploadOptions}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setShowUploadOptions(false)}
-    >
-      <View className="flex-1 bg-black/50 justify-end">
-        <View className="bg-white rounded-t-3xl p-6">
-          <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-6" />
-          
-          <Text className="text-gray-900 text-xl font-bold mb-6">Add Attachment</Text>
-          
-          <TouchableOpacity
-            onPress={() => handleImagePick(true)}
-            className="bg-gray-50 p-4 rounded-xl mb-3"
-            activeOpacity={0.7}
-          >
-            <View className="flex-row items-center">
-              <Text className="text-3xl mr-4">📸</Text>
-              <View>
-                <Text className="text-gray-900 font-semibold text-base">Take Photo</Text>
-                <Text className="text-gray-500 text-sm">Use camera to capture image</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => handleImagePick(false)}
-            className="bg-gray-50 p-4 rounded-xl mb-3"
-            activeOpacity={0.7}
-          >
-            <View className="flex-row items-center">
-              <Text className="text-3xl mr-4">🖼️</Text>
-              <View>
-                <Text className="text-gray-900 font-semibold text-base">Choose Images</Text>
-                <Text className="text-gray-500 text-sm">Select from photo library</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={handleDocumentPick}
-            className="bg-gray-50 p-4 rounded-xl mb-6"
-            activeOpacity={0.7}
-          >
-            <View className="flex-row items-center">
-              <Text className="text-3xl mr-4">📄</Text>
-              <View>
-                <Text className="text-gray-900 font-semibold text-base">Choose Files</Text>
-                <Text className="text-gray-500 text-sm">Documents, videos, and more</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setShowUploadOptions(false)}
-            className="bg-gray-200 p-4 rounded-xl"
-            activeOpacity={0.7}
-          >
-            <Text className="text-gray-900 font-semibold text-center">Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderAttachmentDetail = () => {
-    if (!selectedAttachment) return null;
-
-    const isImage = selectedAttachment.mimeType.startsWith('image/');
-
-    return (
-      <Modal
-        visible={!!selectedAttachment}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setSelectedAttachment(null)}
-      >
-        <View className="flex-1 bg-black/90">
-          {/* Header */}
-          <View className="flex-row items-center justify-between p-4 mt-12">
-            <TouchableOpacity
-              onPress={() => setSelectedAttachment(null)}
-              className="w-10 h-10 bg-black/50 rounded-full items-center justify-center"
-            >
-              <Text className="text-white text-xl">×</Text>
-            </TouchableOpacity>
-            
-            <View className="flex-1 mx-4">
-              <Text className="text-white font-semibold text-lg" numberOfLines={1}>
-                {selectedAttachment.originalName}
+      {/* Stats */}
+      {attachments.length > 0 && (
+        <View className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm text-gray-600">
+              {stats.count} file{stats.count !== 1 ? 's' : ''} • {stats.totalSize}
+            </Text>
+            {stats.types.length > 0 && (
+              <Text className="text-sm text-gray-500 capitalize">
+                {stats.types.join(', ')}
               </Text>
-              <Text className="text-white/70 text-sm">
-                {fileService.formatFileSize(selectedAttachment.size)}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => handleDownloadAttachment(selectedAttachment)}
-              className="w-10 h-10 bg-black/50 rounded-full items-center justify-center"
-            >
-              <Text className="text-white text-xl">↓</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Content */}
-          <View className="flex-1 items-center justify-center">
-            {isImage ? (
-              <Image
-                source={{ uri: selectedAttachment.url }}
-                style={{ width: width - 40, height: width - 40 }}
-                resizeMode="contain"
-              />
-            ) : (
-              <View className="bg-white/10 rounded-2xl p-8 items-center">
-                <Text className="text-6xl mb-4">
-                  {fileService.getFileIcon(selectedAttachment.mimeType)}
-                </Text>
-                <Text className="text-white font-semibold text-xl mb-2">
-                  {selectedAttachment.originalName}
-                </Text>
-                <Text className="text-white/70 text-center mb-6">
-                  {fileService.formatFileSize(selectedAttachment.size)}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => handleDownloadAttachment(selectedAttachment)}
-                  className="bg-white/20 px-6 py-3 rounded-xl"
-                >
-                  <Text className="text-white font-semibold">Download</Text>
-                </TouchableOpacity>
-              </View>
             )}
           </View>
         </View>
-      </Modal>
-    );
-  };
+      )}
 
-  if (loading && attachments.length === 0) {
-    return (
-      <View className="py-6">
-        <View className="flex-row items-center mb-4">
-          <Text className="text-gray-900 font-semibold text-lg">Attachments</Text>
-        </View>
-        <View className="items-center py-8">
-          <ActivityIndicator color="#3B82F6" size="large" />
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View className="py-6">
-      <View className="flex-row items-center justify-between mb-4">
-        <Text className="text-gray-900 font-semibold text-lg">
-          Attachments {attachments.length > 0 && `(${attachments.length})`}
-        </Text>
-        {!readonly && (
-          <TouchableOpacity
-            onPress={() => setShowUploadOptions(true)}
-            className="bg-blue-500 px-4 py-2 rounded-lg"
-            activeOpacity={0.7}
-          >
-            <Text className="text-white font-semibold">Add Files</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Uploading files */}
-        {uploadingFiles.map(renderUploadingItem)}
-
-        {/* Existing attachments */}
-        {attachments.map(renderAttachmentItem)}
-
-        {/* Empty state */}
-        {attachments.length === 0 && uploadingFiles.length === 0 && (
-          <View className="bg-gray-50 rounded-xl p-8 items-center">
-            <Text className="text-4xl mb-2">📎</Text>
-            <Text className="text-gray-500 font-medium mb-1">No attachments</Text>
-            <Text className="text-gray-400 text-center text-sm">
-              {readonly 
-                ? 'This task has no attached files'
-                : 'Add files to share with your team'
-              }
-            </Text>
+      {/* Content */}
+      <View className="p-4 min-h-48">
+        {isLoading ? (
+          <View className="flex-1 items-center justify-center py-8">
+            <Text className="text-gray-500">Loading attachments...</Text>
           </View>
+        ) : (
+          <>
+            {/* Upload Area */}
+            {showUpload && editable && (
+              <View className="mb-6">
+                <FileUpload
+                  taskId={taskId}
+                  maxFiles={maxFiles - attachments.length}
+                  onUploadComplete={handleUploadComplete}
+                  onUploadError={handleUploadError}
+                  disabled={attachments.length >= maxFiles}
+                >
+                  <View className="border-2 border-dashed border-gray-300 rounded-lg p-4 items-center justify-center">
+                    <Icon name="upload" size={24} color="#9CA3AF" />
+                    <Text className="text-gray-600 font-medium mt-2">
+                      {attachments.length >= maxFiles
+                        ? 'Maximum files reached'
+                        : 'Add attachments'
+                      }
+                    </Text>
+                    {attachments.length < maxFiles && (
+                      <Text className="text-gray-400 text-sm">
+                        Tap to upload files ({maxFiles - attachments.length} remaining)
+                      </Text>
+                    )}
+                  </View>
+                </FileUpload>
+              </View>
+            )}
+
+            {/* Attachments List */}
+            <View className="flex-1">
+              {renderAttachments()}
+            </View>
+          </>
         )}
-      </ScrollView>
-
-      {/* Upload options modal */}
-      {renderUploadOptions()}
-
-      {/* Attachment detail modal */}
-      {renderAttachmentDetail()}
+      </View>
     </View>
   );
 };

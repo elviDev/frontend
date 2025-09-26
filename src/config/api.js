@@ -21,4 +21,4 @@ export const WS_BASE_URL = API_CONFIG.WS_URL;
 // Development environment (dev server not running)
 // export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
 // export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
-export default API_CONFIG
+export default API_CONFIG 

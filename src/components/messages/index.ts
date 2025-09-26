@@ -8,6 +8,7 @@ export { TypingIndicator } from './TypingIndicator';
 export { EmptyState } from './EmptyState';
 export { AIActions } from './AIActions';
 export { ReactionPicker } from './ReactionPicker';
+export { VoiceMessage, CompactVoiceMessage } from './VoiceMessage';
 
 // Types
 export type { Message as MessageType, TypingUser, MessageAttachment, MessageReaction } from '../../types/message';

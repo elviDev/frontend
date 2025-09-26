@@ -7,9 +7,8 @@ import {
   Image,
   Linking,
   Dimensions,
-  PanGestureHandler,
-  State,
 } from 'react-native';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useDispatch } from 'react-redux';
 import { markAnnouncementAsRead } from '../../store/slices/announcementSlice';
 import { Announcement } from '../../types/announcement.types';
@@ -175,7 +174,7 @@ export const AnnouncementNotification: React.FC<AnnouncementNotificationProps> =
       >
         <Animated.View>
           <View
-            className=\"rounded-xl shadow-lg overflow-hidden\"
+            className="rounded-xl shadow-lg overflow-hidden"
             style={{
               backgroundColor: getBackgroundColor(announcement.type),
               borderLeftWidth: 4,
@@ -183,33 +182,33 @@ export const AnnouncementNotification: React.FC<AnnouncementNotificationProps> =
             }}
           >
             {/* Header */}
-            <View className=\"flex-row items-start p-4 pb-3\">
-              <View 
-                className=\"w-10 h-10 rounded-full items-center justify-center mr-3\"
+            <View className="flex-row items-start p-4 pb-3">
+              <View
+                className="w-10 h-10 rounded-full items-center justify-center mr-3"
                 style={{ backgroundColor: `${getTypeColor(announcement.type)}20` }}
               >
-                <Icon 
-                  name={getTypeIcon(announcement.type)} 
-                  size={20} 
-                  color={getTypeColor(announcement.type)} 
+                <Icon
+                  name={getTypeIcon(announcement.type)}
+                  size={20}
+                  color={getTypeColor(announcement.type)}
                 />
               </View>
-              
-              <View className=\"flex-1\">
-                <View className=\"flex-row items-center justify-between mb-1\">
-                  <Text className=\"text-gray-900 font-bold text-base flex-1\" numberOfLines={2}>
+
+              <View className="flex-1">
+                <View className="flex-row items-center justify-between mb-1">
+                  <Text className="text-gray-900 font-bold text-base flex-1" numberOfLines={2}>
                     {announcement.title}
                   </Text>
                   <TouchableOpacity
                     onPress={handleDismiss}
-                    className=\"ml-2 p-1\"
+                    className="ml-2 p-1"
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Icon name=\"x\" size={20} color=\"#6B7280\" />
+                    <Icon name="x" size={20} color="#6B7280" />
                   </TouchableOpacity>
                 </View>
-                
-                <Text className=\"text-gray-700 text-sm leading-5\" numberOfLines={3}>
+
+                <Text className="text-gray-700 text-sm leading-5" numberOfLines={3}>
                   {announcement.content}
                 </Text>
               </View>
@@ -217,52 +216,52 @@ export const AnnouncementNotification: React.FC<AnnouncementNotificationProps> =
 
             {/* Image */}
             {announcement.imageUrl && (
-              <View className=\"px-4 pb-3\">
-                <Image 
-                  source={{ uri: announcement.imageUrl }} 
-                  className=\"w-full h-32 rounded-lg\"
-                  resizeMode=\"cover\"
+              <View className="px-4 pb-3">
+                <Image
+                  source={{ uri: announcement.imageUrl }}
+                  className="w-full h-32 rounded-lg"
+                  resizeMode="cover"
                 />
               </View>
             )}
 
             {/* Action Button and Footer */}
-            <View className=\"px-4 pb-4\">
+            <View className="px-4 pb-4">
               {announcement.actionButton && (
-                <TouchableOpacity 
-                  className=\"mb-3 py-3 px-4 rounded-lg items-center\"
+                <TouchableOpacity
+                  className="mb-3 py-3 px-4 rounded-lg items-center"
                   style={{ backgroundColor: getTypeColor(announcement.type) }}
                   onPress={handleActionButton}
                   activeOpacity={0.8}
                 >
-                  <Text className=\"text-white font-semibold\">
+                  <Text className="text-white font-semibold">
                     {announcement.actionButton.text}
                   </Text>
                 </TouchableOpacity>
               )}
-              
-              <View className=\"flex-row items-center justify-between\">
-                <View className=\"flex-row items-center\">
-                  <View 
-                    className=\"px-2 py-1 rounded-full mr-2\"
+
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center">
+                  <View
+                    className="px-2 py-1 rounded-full mr-2"
                     style={{ backgroundColor: `${getPriorityBorder(announcement.priority)}20` }}
                   >
-                    <Text 
-                      className=\"text-xs font-medium capitalize\"
+                    <Text
+                      className="text-xs font-medium capitalize"
                       style={{ color: getPriorityBorder(announcement.priority) }}
                     >
                       {announcement.priority}
                     </Text>
                   </View>
-                  <Text className=\"text-gray-500 text-xs\">
-                    {new Date(announcement.createdAt).toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
+                  <Text className="text-gray-500 text-xs">
+                    {new Date(announcement.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
                     })}
                   </Text>
                 </View>
-                
-                <Text className=\"text-gray-400 text-xs\">
+
+                <Text className="text-gray-400 text-xs">
                   Swipe to dismiss
                 </Text>
               </View>
