@@ -58,7 +58,6 @@ interface WebSocketTypingEvent {
 export const useMessages = (channelId: string) => {
   const { user: currentUser } = useSelector((state: RootState) => state.auth);
   const { showError, showSuccess } = useToast();
-  
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -66,12 +65,16 @@ export const useMessages = (channelId: string) => {
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
-  
+
   // Production-grade state management
-  const [editingMessages, setEditingMessages] = useState<Set<string>>(new Set());
-  const [deletingMessages, setDeletingMessages] = useState<Set<string>>(new Set());
+  const [editingMessages, setEditingMessages] = useState<Set<string>>(
+    new Set(),
+  );
+  const [deletingMessages, setDeletingMessages] = useState<Set<string>>(
+    new Set(),
+  );
   const [messageIds, setMessageIds] = useState<Set<string>>(new Set());
-  
+
   // Enhanced pagination state with proper cursor-based pagination
   const [pagination, setPagination] = useState({
     offset: 0,
@@ -81,22 +84,21 @@ export const useMessages = (channelId: string) => {
     nextCursor: null as string | null,
     isInitialLoad: true,
   });
-  
 
   // Helper function to ensure message has required properties
   const normalizeMessage = useCallback((msg: Message): Message => {
     let reactions = msg.reactions || [];
-    
+
     // If reactions is an object, convert to array
     if (typeof reactions === 'object' && !Array.isArray(reactions)) {
       reactions = Object.values(reactions);
     }
-    
+
     // Ensure it's an array
     if (!Array.isArray(reactions)) {
       reactions = [];
     }
-    
+
     return {
       ...msg,
       reactions,
@@ -106,28 +108,31 @@ export const useMessages = (channelId: string) => {
   }, []);
 
   // Message state updater with ID-based deduplication
-  const updateMessages = useCallback((updater: (prev: Message[]) => Message[]) => {
-    setMessages(prev => {
-      const updated = updater(prev);
-      const normalized = updated.map(normalizeMessage);
+  const updateMessages = useCallback(
+    (updater: (prev: Message[]) => Message[]) => {
+      setMessages(prev => {
+        const updated = updater(prev);
+        const normalized = updated.map(normalizeMessage);
 
-      // Filter out messages with duplicate IDs
-      const deduplicatedMessages: Message[] = [];
-      const seenIds = new Set<string>();
+        // Filter out messages with duplicate IDs
+        const deduplicatedMessages: Message[] = [];
+        const seenIds = new Set<string>();
 
-      normalized.forEach(msg => {
-        if (msg && msg.id && !seenIds.has(msg.id)) {
-          seenIds.add(msg.id);
-          deduplicatedMessages.push(msg);
-        }
+        normalized.forEach(msg => {
+          if (msg && msg.id && !seenIds.has(msg.id)) {
+            seenIds.add(msg.id);
+            deduplicatedMessages.push(msg);
+          }
+        });
+
+        // Update the messageIds Set
+        setMessageIds(seenIds);
+
+        return deduplicatedMessages;
       });
-
-      // Update the messageIds Set
-      setMessageIds(seenIds);
-
-      return deduplicatedMessages;
-    });
-  }, [normalizeMessage]);
+    },
+    [normalizeMessage],
+  );
 
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadedRef = useRef<string>('');
@@ -140,15 +145,14 @@ export const useMessages = (channelId: string) => {
 
   // No transformation needed - use backend data directly
 
-
   const loadMessages = useCallback(async () => {
     const loadKey = `${channelId}-channel`;
-    
+
     // Cancel any existing load operation
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     // Check if already loaded or component unmounted
     if (loadedRef.current === loadKey || !isMountedRef.current) {
       return;
@@ -166,33 +170,49 @@ export const useMessages = (channelId: string) => {
         limit: 50,
         offset: 0,
       });
-      
+
       // Check if operation was aborted
       if (signal.aborted || !isMountedRef.current) return;
-      
-      if (response.success || (response.data !== undefined && response.data !== null)) {
+
+      if (
+        response.success ||
+        (response.data !== undefined && response.data !== null)
+      ) {
         // Handle empty messages array gracefully
         const messagesArray = Array.isArray(response.data) ? response.data : [];
         // Double-check component is still mounted before updating state
         if (isMountedRef.current) {
           // Sort messages by timestamp (oldest first)
-          const sortedMessages = messagesArray.sort((a, b) => 
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          const sortedMessages = messagesArray.sort(
+            (a, b) =>
+              new Date(a.created_at).getTime() -
+              new Date(b.created_at).getTime(),
           );
           setMessages(sortedMessages);
-          const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
-          setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
-          
+          const paginationData = response.pagination || {
+            hasMore: false,
+            has_more: false,
+            total: 0,
+            next_cursor: null,
+            nextCursor: null,
+          };
+          setHasMoreMessages(
+            paginationData.hasMore || paginationData.has_more || false,
+          );
+
           // Initialize pagination state for channel
           setPagination({
             offset: sortedMessages.length,
             limit: 20,
             total: paginationData.total || 0,
             hasMore: paginationData.hasMore || paginationData.has_more || false,
-            nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
+            nextCursor:
+              (paginationData as any).next_cursor ||
+              (paginationData as any).nextCursor ||
+              null,
             isInitialLoad: false,
           });
-          
+
           loadedRef.current = loadKey;
         }
       } else {
@@ -213,14 +233,15 @@ export const useMessages = (channelId: string) => {
       }
     } catch (err: any) {
       console.error('Load messages error:', err.message || err);
-      
+
       // Check if this is a "not found" or "no content" type error
-      const isEmptyResult = err.error?.statusCode === 404 || 
-                          err.error?.statusCode === 204 ||
-                          err.error?.message?.toLowerCase().includes('not found') ||
-                          err.error?.message?.toLowerCase().includes('no messages') ||
-                          err.error?.message?.toLowerCase().includes('no replies');
-      
+      const isEmptyResult =
+        err.error?.statusCode === 404 ||
+        err.error?.statusCode === 204 ||
+        err.error?.message?.toLowerCase().includes('not found') ||
+        err.error?.message?.toLowerCase().includes('no messages') ||
+        err.error?.message?.toLowerCase().includes('no replies');
+
       if (isEmptyResult && isMountedRef.current && !signal.aborted) {
         // Handle empty state gracefully without showing an error
         setMessages([]);
@@ -236,19 +257,27 @@ export const useMessages = (channelId: string) => {
         loadedRef.current = loadKey;
         return;
       }
-      
+
       // More detailed error handling for actual errors
       let errorMessage = 'Failed to load messages';
-      if (err.name === 'TypeError' && err.message.includes('Network request failed')) {
-        errorMessage = 'Network connection failed. Please check your internet connection or try again later.';
-      } else if (err.message?.includes('fetch') || err.message?.includes('network')) {
-        errorMessage = 'Connection error. Please check your internet connection and try again.';
+      if (
+        err.name === 'TypeError' &&
+        err.message.includes('Network request failed')
+      ) {
+        errorMessage =
+          'Network connection failed. Please check your internet connection or try again later.';
+      } else if (
+        err.message?.includes('fetch') ||
+        err.message?.includes('network')
+      ) {
+        errorMessage =
+          'Connection error. Please check your internet connection and try again.';
       } else if (err.error?.message) {
         errorMessage = err.error.message;
       } else if (err.message) {
         errorMessage = err.message;
       }
-      
+
       // Only set error if component is still mounted and operation wasn't aborted
       if (isMountedRef.current && !signal.aborted) {
         setError(errorMessage);
@@ -285,52 +314,73 @@ export const useMessages = (channelId: string) => {
         offset: pagination.offset,
         ...(pagination.nextCursor && { cursor: pagination.nextCursor }),
       };
-      
+
       // Load more channel messages
-      const response = await messageService.getChannelMessages(channelId, requestOptions);
-      
+      const response = await messageService.getChannelMessages(
+        channelId,
+        requestOptions,
+      );
+
       if (response.success && isMountedRef.current) {
         // Handle empty messages array gracefully
         const messagesArray = Array.isArray(response.data) ? response.data : [];
-        
+
         // Smart message merging to prevent duplicates
         updateMessages(prev => [...prev, ...messagesArray]);
-        
+
         // Update pagination state
-        const paginationData = response.pagination || { hasMore: false, has_more: false, total: 0, next_cursor: null, nextCursor: null };
+        const paginationData = response.pagination || {
+          hasMore: false,
+          has_more: false,
+          total: 0,
+          next_cursor: null,
+          nextCursor: null,
+        };
         setPagination(prev => ({
           ...prev,
           offset: prev.offset + messagesArray.length,
           hasMore: paginationData.hasMore || paginationData.has_more || false,
-          nextCursor: (paginationData as any).next_cursor || (paginationData as any).nextCursor || null,
+          nextCursor:
+            (paginationData as any).next_cursor ||
+            (paginationData as any).nextCursor ||
+            null,
           total: paginationData.total || prev.total,
         }));
-        
-        setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
+
+        setHasMoreMessages(
+          paginationData.hasMore || paginationData.has_more || false,
+        );
       }
     } catch (err: any) {
       console.error('Failed to load more messages:', err.message || err);
-      
+
       if (isMountedRef.current) {
         // Check if this is a "not found" or "no content" type error
-        const isEmptyResult = err.error?.statusCode === 404 || 
-                            err.error?.statusCode === 204 ||
-                            err.error?.message?.toLowerCase().includes('not found') ||
-                            err.error?.message?.toLowerCase().includes('no messages') ||
-                            err.error?.message?.toLowerCase().includes('no replies');
-        
+        const isEmptyResult =
+          err.error?.statusCode === 404 ||
+          err.error?.statusCode === 204 ||
+          err.error?.message?.toLowerCase().includes('not found') ||
+          err.error?.message?.toLowerCase().includes('no messages') ||
+          err.error?.message?.toLowerCase().includes('no replies');
+
         if (isEmptyResult) {
           // Handle empty state gracefully without showing an error
           setHasMoreMessages(false);
           setPagination(prev => ({ ...prev, hasMore: false }));
           return;
         }
-        
+
         // Enhanced error handling with retry capability for actual errors
-        const errorMessage = err.error?.message || err.message || 'Failed to load more messages';
-        
-        if (err.name === 'TypeError' && err.message.includes('Network request failed')) {
-          showError('Network error. Please check your connection and try again.');
+        const errorMessage =
+          err.error?.message || err.message || 'Failed to load more messages';
+
+        if (
+          err.name === 'TypeError' &&
+          err.message.includes('Network request failed')
+        ) {
+          showError(
+            'Network error. Please check your connection and try again.',
+          );
         } else if (err.error?.statusCode === 429) {
           showError('Too many requests. Please wait a moment and try again.');
         } else {
@@ -344,357 +394,430 @@ export const useMessages = (channelId: string) => {
       }
     }
   }, [
-    isLoadingMore, 
-    hasMoreMessages, 
+    isLoadingMore,
+    hasMoreMessages,
     pagination,
     channelId,
-    messages.length, 
-    showError, 
-    updateMessages
+    messages.length,
+    showError,
+    updateMessages,
   ]);
 
-  const sendMessage = useCallback(async (params: SendMessageParams, retryCount = 0): Promise<Message | undefined> => {
-    try {
-      // Send message directly without optimistic updates
-      const response = await messageService.sendMessage(channelId, {
-        content: params.content,
-        message_type: params.type === 'image' ? 'file' : (params.type as 'text' | 'voice' | 'file' | 'system'),
-        reply_to_id: params.replyTo?.id,
-        attachments: params.attachments?.map(att => ({
-          file_id: att.id,
-          filename: att.name,
-          file_type: att.type,
-          file_size: att.size || 0,
-        })),
-      });
+  const sendMessage = useCallback(
+    async (
+      params: SendMessageParams,
+      retryCount = 0,
+    ): Promise<Message | undefined> => {
+      try {
+        // Send message directly without optimistic updates
+        const response = await messageService.sendMessage(channelId, {
+          content: params.content,
+          message_type:
+            params.type === 'image'
+              ? 'file'
+              : (params.type as 'text' | 'voice' | 'file' | 'system'),
+          reply_to_id: params.replyTo?.id,
+          attachments: params.attachments?.map(att => ({
+            file_id: att.id,
+            filename: att.name,
+            file_type: att.type,
+            file_size: att.size || 0,
+          })),
+        });
 
-      if (response.success) {
-        showSuccess('Message sent!');
-        return response.data as Message;
-      } else {
-        throw new Error((response as any).error?.message || 'Failed to send message');
+        if (response.success) {
+          showSuccess('Message sent!');
+          return response.data as Message;
+        } else {
+          throw new Error(
+            (response as any).error?.message || 'Failed to send message',
+          );
+        }
+      } catch (err: any) {
+        console.error('❌ Failed to send message:', err);
+
+        // Enhanced error handling with retry capability
+        const shouldRetry =
+          retryCount < 2 &&
+          ((err.name === 'TypeError' &&
+            err.message.includes('Network request failed')) ||
+            err.error?.statusCode >= 500);
+
+        if (shouldRetry) {
+          // Wait before retry with exponential backoff
+          await new Promise(resolve =>
+            setTimeout(resolve, Math.pow(2, retryCount) * 1000),
+          );
+          return sendMessage(params, retryCount + 1);
+        }
+
+        const errorMessage =
+          err.error?.message || err.message || 'Failed to send message';
+        showError(`Failed to send message: ${errorMessage}`);
+
+        throw err;
       }
-    } catch (err: any) {
-      console.error('❌ Failed to send message:', err);
+    },
+    [showSuccess, showError, channelId],
+  );
 
-      // Enhanced error handling with retry capability
-      const shouldRetry = retryCount < 2 && (
-        err.name === 'TypeError' && err.message.includes('Network request failed') ||
-        err.error?.statusCode >= 500
-      );
-
-      if (shouldRetry) {
-        // Wait before retry with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-        return sendMessage(params, retryCount + 1);
-      }
-
-      const errorMessage = err.error?.message || err.message || 'Failed to send message';
-      showError(`Failed to send message: ${errorMessage}`);
-
-      throw err;
-    }
-  }, [showSuccess, showError, channelId]);
-
-  const editMessage = useCallback(async (messageId: string, content: string, retryCount = 0): Promise<void> => {
-    const originalMessage = messages.find(m => m.id === messageId);
-    if (!originalMessage) {
-      return;
-    }
-
-    // Prevent editing if already being edited
-    if (editingMessages.has(messageId)) {
-      return;
-    }
-
-    // Mark as being edited
-    setEditingMessages(prev => new Set([...Array.from(prev), messageId]));
-
-    // Optimistically update with loading state
-    const optimisticMessage = {
-      ...originalMessage,
-      content,
-      isEdited: true,
-      editedAt: new Date(),
-      isBeingEdited: true,
-    };
-
-    updateMessages(prev => prev.map(msg => 
-      msg.id === messageId ? optimisticMessage : msg
-    ));
-
-    try {
-      const response = await messageService.editMessage(channelId, messageId, content);
-      
-      if (response.success && response.data) {
-        // Update with real data from API (no transformation needed)
-        const updatedMessage = response.data as Message;
-        const finalMessage = {
-          ...updatedMessage,
-          isBeingEdited: false,
-        };
-        
-        updateMessages(prev => prev.map(msg => 
-          msg.id === messageId ? finalMessage : msg
-        ));
-        
-        showSuccess('Message updated!');
-      } else {
-        throw new Error((response as any).error?.message || 'Failed to edit message');
-      }
-    } catch (err: any) {
-      console.error('❌ Failed to edit message:', err);
-      
-      // Enhanced error handling with retry capability
-      const shouldRetry = retryCount < 2 && (
-        err.name === 'TypeError' && err.message.includes('Network request failed') ||
-        err.error?.statusCode >= 500
-      );
-      
-      if (shouldRetry) {
-        // Wait before retry with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-        
-        return editMessage(messageId, content, retryCount + 1);
-      }
-      
-      // Revert to original message on final failure
-      updateMessages(prev => prev.map(msg => 
-        msg.id === messageId ? { ...originalMessage, isBeingEdited: false } : msg
-      ));
-      
-      
-      const errorMessage = err.error?.message || err.message || 'Failed to edit message';
-      showError(`Failed to edit message: ${errorMessage}`);
-      
-      throw err;
-    } finally {
-      // Remove from editing set
-      setEditingMessages(prev => {
-        const updated = new Set(prev);
-        updated.delete(messageId);
-        return updated;
-      });
-    }
-  }, [messages, editingMessages, updateMessages, showSuccess, showError]);
-
-  const deleteMessage = useCallback(async (messageId: string, retryCount = 0): Promise<void> => {
-    const originalMessage = messages.find(m => m.id === messageId);
-    if (!originalMessage) {
-      return;
-    }
-
-    // Prevent deleting if already being deleted
-    if (deletingMessages.has(messageId)) {
-      return;
-    }
-
-    // Mark as being deleted
-    setDeletingMessages(prev => new Set([...Array.from(prev), messageId]));
-
-    try {
-      const response = await messageService.deleteMessage(channelId, messageId);
-      
-      if (response.success) {
-        // Remove message from list completely on successful delete
-        updateMessages(prev => prev.filter(msg => msg.id !== messageId));
-        
-        
-        showSuccess('Message deleted!');
-      } else {
-        throw new Error((response as any).error?.message || 'Failed to delete message');
-      }
-    } catch (err: any) {
-      console.error('❌ Failed to delete message:', err);
-      
-      // Enhanced error handling with retry capability
-      const shouldRetry = retryCount < 2 && (
-        err.name === 'TypeError' && err.message.includes('Network request failed') ||
-        err.error?.statusCode >= 500
-      );
-      
-      if (shouldRetry) {
-        // Wait before retry with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
-        
-        return deleteMessage(messageId, retryCount + 1);
-      }
-      
-      // Revert to original message on final failure
-      updateMessages(prev => prev.map(msg => 
-        msg.id === messageId ? { ...originalMessage, isBeingDeleted: false } : msg
-      ));
-      
-      
-      const errorMessage = err.error?.message || err.message || 'Failed to delete message';
-      showError(`Failed to delete message: ${errorMessage}`);
-      
-      throw err;
-    } finally {
-      // Remove from deleting set
-      setDeletingMessages(prev => {
-        const updated = new Set(prev);
-        updated.delete(messageId);
-        return updated;
-      });
-    }
-  }, [messages, deletingMessages, updateMessages, showSuccess, showError]);
-
-
-  const addReaction = useCallback(async (messageId: string, emoji: string): Promise<void> => {
-    try {
-      const currentUserId = currentUser?.id || 'current-user';
+  const editMessage = useCallback(
+    async (
+      messageId: string,
+      content: string,
+      retryCount = 0,
+    ): Promise<void> => {
       const originalMessage = messages.find(m => m.id === messageId);
-      
       if (!originalMessage) {
         return;
       }
-    
-    // Optimistically update UI
-    setMessages(prev => prev.map(msg => {
-      if (msg.id !== messageId) return msg;
 
-      // Ensure reactions array exists - handle both array and object formats
-      let reactions = msg.reactions || [];
-      
-      // If reactions is an object, convert to array
-      if (typeof reactions === 'object' && !Array.isArray(reactions)) {
-        reactions = Object.values(reactions);
+      // Prevent editing if already being edited
+      if (editingMessages.has(messageId)) {
+        return;
       }
-      
-      // Ensure it's an array
-      if (!Array.isArray(reactions)) {
-        reactions = [];
-      }
-      const existingReaction = reactions.find(r => r.emoji === emoji);
-      const userAlreadyReacted = existingReaction?.users.some((u: any) => u.id === currentUserId);
 
-      if (userAlreadyReacted) {
-        
-        // Remove user's reaction
-        return {
-          ...msg,
-          reactions: reactions.map(r => 
-            r.emoji === emoji
-              ? {
-                  ...r,
-                  users: r.users.filter((u: any) => u.id !== currentUserId),
-                  count: r.count - 1,
-                }
-              : r
-          ).filter(r => r.count > 0),
-        };
-      } else {
-        // Add user's reaction
-        if (existingReaction) {
-          return {
-            ...msg,
-            reactions: reactions.map(r => 
-              r.emoji === emoji
-                ? {
-                    ...r,
-                    users: [...r.users, { 
-                      id: currentUserId, 
-                      name: currentUser?.name || 'Current User',
-                      email: currentUser?.email || '',
-                      isOnline: true,
-                    }],
-                    count: r.count + 1,
-                  }
-                : r
-            ),
+      // Mark as being edited
+      setEditingMessages(prev => new Set([...Array.from(prev), messageId]));
+
+      // Optimistically update with loading state
+      const optimisticMessage = {
+        ...originalMessage,
+        content,
+        isEdited: true,
+        editedAt: new Date(),
+        isBeingEdited: true,
+      };
+
+      updateMessages(prev =>
+        prev.map(msg => (msg.id === messageId ? optimisticMessage : msg)),
+      );
+
+      try {
+        const response = await messageService.editMessage(
+          channelId,
+          messageId,
+          content,
+        );
+
+        if (response.success && response.data) {
+          // Update with real data from API (no transformation needed)
+          const updatedMessage = response.data as Message;
+          const finalMessage = {
+            ...updatedMessage,
+            isBeingEdited: false,
           };
+
+          updateMessages(prev =>
+            prev.map(msg => (msg.id === messageId ? finalMessage : msg)),
+          );
+
+          showSuccess('Message updated!');
         } else {
-          return {
-            ...msg,
-            reactions: [...reactions, {
-              emoji,
-              users: [{ 
-                id: currentUserId, 
-                name: currentUser?.name || 'Current User',
-                email: currentUser?.email || '',
-                isOnline: true,
-              }],
-              count: 1,
-            }],
-          };
+          throw new Error(
+            (response as any).error?.message || 'Failed to edit message',
+          );
         }
-      }
-    }));
+      } catch (err: any) {
+        console.error('❌ Failed to edit message:', err);
 
-    try {
-      const response = await messageService.toggleReaction(channelId, messageId, emoji);
-      
-      if (response.success) {
-        
-        // Handle different response formats
-        let currentReactions = [];
-        if (response.data?.current_reactions) {
-          // Expected format: {current_reactions: [...]}
-          currentReactions = response.data.current_reactions;
-        } else if (Array.isArray(response.data)) {
-          // Alternative format: direct array
-          currentReactions = response.data;
+        // Enhanced error handling with retry capability
+        const shouldRetry =
+          retryCount < 2 &&
+          ((err.name === 'TypeError' &&
+            err.message.includes('Network request failed')) ||
+            err.error?.statusCode >= 500);
+
+        if (shouldRetry) {
+          // Wait before retry with exponential backoff
+          await new Promise(resolve =>
+            setTimeout(resolve, Math.pow(2, retryCount) * 1000),
+          );
+
+          return editMessage(messageId, content, retryCount + 1);
+        }
+
+        // Revert to original message on final failure
+        updateMessages(prev =>
+          prev.map(msg =>
+            msg.id === messageId
+              ? { ...originalMessage, isBeingEdited: false }
+              : msg,
+          ),
+        );
+
+        const errorMessage =
+          err.error?.message || err.message || 'Failed to edit message';
+        showError(`Failed to edit message: ${errorMessage}`);
+
+        throw err;
+      } finally {
+        // Remove from editing set
+        setEditingMessages(prev => {
+          const updated = new Set(prev);
+          updated.delete(messageId);
+          return updated;
+        });
+      }
+    },
+    [messages, editingMessages, updateMessages, showSuccess, showError],
+  );
+
+  const deleteMessage = useCallback(
+    async (messageId: string, retryCount = 0): Promise<void> => {
+      const originalMessage = messages.find(m => m.id === messageId);
+      if (!originalMessage) {
+        return;
+      }
+
+      // Prevent deleting if already being deleted
+      if (deletingMessages.has(messageId)) {
+        return;
+      }
+
+      // Mark as being deleted
+      setDeletingMessages(prev => new Set([...Array.from(prev), messageId]));
+
+      try {
+        const response = await messageService.deleteMessage(
+          channelId,
+          messageId,
+        );
+        console.log('Delete message response:', response);
+        if (response.success) {
+          // Remove message from list completely on successful delete
+          updateMessages(prev => prev.filter(msg => msg.id !== messageId));
+
+          showSuccess('Message deleted!');
         } else {
-          // Keep the optimistic update, don't revert
+          throw new Error(
+            (response as any).error?.message || 'Failed to delete message',
+          );
+        }
+      } catch (err: any) {
+        console.error('❌ Failed to delete message:', err);
+
+        // Enhanced error handling with retry capability
+        const shouldRetry =
+          retryCount < 2 &&
+          ((err.name === 'TypeError' &&
+            err.message.includes('Network request failed')) ||
+            err.error?.statusCode >= 500);
+
+        if (shouldRetry) {
+          // Wait before retry with exponential backoff
+          await new Promise(resolve =>
+            setTimeout(resolve, Math.pow(2, retryCount) * 1000),
+          );
+
+          return deleteMessage(messageId, retryCount + 1);
+        }
+
+        // Revert to original message on final failure
+        updateMessages(prev =>
+          prev.map(msg =>
+            msg.id === messageId
+              ? { ...originalMessage, isBeingDeleted: false }
+              : msg,
+          ),
+        );
+
+        const errorMessage =
+          err.error?.message || err.message || 'Failed to delete message';
+        showError(`Failed to delete message: ${errorMessage}`);
+
+        throw err;
+      } finally {
+        // Remove from deleting set
+        setDeletingMessages(prev => {
+          const updated = new Set(prev);
+          updated.delete(messageId);
+          return updated;
+        });
+      }
+    },
+    [messages, deletingMessages, updateMessages, showSuccess, showError],
+  );
+
+  const addReaction = useCallback(
+    async (messageId: string, emoji: string): Promise<void> => {
+      try {
+        const currentUserId = currentUser?.id || 'current-user';
+        const originalMessage = messages.find(m => m.id === messageId);
+
+        if (!originalMessage) {
           return;
         }
-        const updatedReactions = currentReactions.map((r: {
-          emoji: string;
-          count: number;
-          users: Array<{
-            id: string;
-            name: string;
-            email?: string;
-            avatar_url?: string;
-          }>;
-        }) => ({
-          emoji: r.emoji,
-          count: r.count,
-          users: r.users.map((u) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email || '',
-            avatar: u.avatar_url || '',
-            isOnline: true,
-          })),
-        }));
-        
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, reactions: updatedReactions }
-            : msg
-        ));
+
+        // Optimistically update UI
+        setMessages(prev =>
+          prev.map(msg => {
+            if (msg.id !== messageId) return msg;
+
+            // Ensure reactions array exists - handle both array and object formats
+            let reactions = msg.reactions || [];
+
+            // If reactions is an object, convert to array
+            if (typeof reactions === 'object' && !Array.isArray(reactions)) {
+              reactions = Object.values(reactions);
+            }
+
+            // Ensure it's an array
+            if (!Array.isArray(reactions)) {
+              reactions = [];
+            }
+            const existingReaction = reactions.find(r => r.emoji === emoji);
+            const userAlreadyReacted = existingReaction?.users.some(
+              (u: any) => u.id === currentUserId,
+            );
+
+            if (userAlreadyReacted) {
+              // Remove user's reaction
+              return {
+                ...msg,
+                reactions: reactions
+                  .map(r =>
+                    r.emoji === emoji
+                      ? {
+                          ...r,
+                          users: r.users.filter(
+                            (u: any) => u.id !== currentUserId,
+                          ),
+                          count: r.count - 1,
+                        }
+                      : r,
+                  )
+                  .filter(r => r.count > 0),
+              };
+            } else {
+              // Add user's reaction
+              if (existingReaction) {
+                return {
+                  ...msg,
+                  reactions: reactions.map(r =>
+                    r.emoji === emoji
+                      ? {
+                          ...r,
+                          users: [
+                            ...r.users,
+                            {
+                              id: currentUserId,
+                              name: currentUser?.name || 'Current User',
+                              email: currentUser?.email || '',
+                              isOnline: true,
+                            },
+                          ],
+                          count: r.count + 1,
+                        }
+                      : r,
+                  ),
+                };
+              } else {
+                return {
+                  ...msg,
+                  reactions: [
+                    ...reactions,
+                    {
+                      emoji,
+                      users: [
+                        {
+                          id: currentUserId,
+                          name: currentUser?.name || 'Current User',
+                          email: currentUser?.email || '',
+                          isOnline: true,
+                        },
+                      ],
+                      count: 1,
+                    },
+                  ],
+                };
+              }
+            }
+          }),
+        );
+
+        try {
+          const response = await messageService.toggleReaction(
+            channelId,
+            messageId,
+            emoji,
+          );
+
+          if (response.success) {
+            // Handle different response formats
+            let currentReactions = [];
+            if (response.data?.current_reactions) {
+              // Expected format: {current_reactions: [...]}
+              currentReactions = response.data.current_reactions;
+            } else if (Array.isArray(response.data)) {
+              // Alternative format: direct array
+              currentReactions = response.data;
+            } else {
+              // Keep the optimistic update, don't revert
+              return;
+            }
+            const updatedReactions = currentReactions.map(
+              (r: {
+                emoji: string;
+                count: number;
+                users: Array<{
+                  id: string;
+                  name: string;
+                  email?: string;
+                  avatar_url?: string;
+                }>;
+              }) => ({
+                emoji: r.emoji,
+                count: r.count,
+                users: r.users.map(u => ({
+                  id: u.id,
+                  name: u.name,
+                  email: u.email || '',
+                  avatar: u.avatar_url || '',
+                  isOnline: true,
+                })),
+              }),
+            );
+
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === messageId
+                  ? { ...msg, reactions: updatedReactions }
+                  : msg,
+              ),
+            );
+          }
+        } catch (err: any) {
+          console.error('Failed to toggle reaction:', err.message || err);
+          // Revert on error - ensure original message has reactions array
+          const safeOriginalMessage = {
+            ...originalMessage,
+            reactions: originalMessage.reactions || [],
+          };
+          setMessages(prev =>
+            prev.map(msg => (msg.id === messageId ? safeOriginalMessage : msg)),
+          );
+        }
+      } catch (error: any) {
+        console.error('Critical error in addReaction:', error.message || error);
+        // Don't update UI state on critical errors
       }
-    } catch (err: any) {
-      console.error('Failed to toggle reaction:', err.message || err);
-      // Revert on error - ensure original message has reactions array
-      const safeOriginalMessage = {
-        ...originalMessage,
-        reactions: originalMessage.reactions || []
-      };
-      setMessages(prev => prev.map(msg => 
-        msg.id === messageId ? safeOriginalMessage : msg
-      ));
-    }
-    } catch (error: any) {
-      console.error('Critical error in addReaction:', error.message || error);
-      // Don't update UI state on critical errors
-    }
-  }, [currentUser, messages, channelId]);
+    },
+    [currentUser, messages, channelId],
+  );
 
   // Enhanced typing indicators with debouncing and proper cleanup
   const startTyping = useCallback(() => {
     const now = Date.now();
-    
+
     // Debounce typing events - only send if last typing was more than 1 second ago
     if (now - lastTypingTimestampRef.current < 1000) {
       return;
     }
-    
+
     lastTypingTimestampRef.current = now;
     webSocketService.startTyping(channelId, 'channel');
-    
+
     // Clear existing timeout
     if (typingDebounceRef.current) {
       clearTimeout(typingDebounceRef.current);
@@ -708,7 +831,7 @@ export const useMessages = (channelId: string) => {
 
   const stopTyping = useCallback(() => {
     webSocketService.stopTyping(channelId, 'channel');
-    
+
     // Clear all typing-related timeouts
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -729,7 +852,9 @@ export const useMessages = (channelId: string) => {
     if (!webSocketService.isConnected()) {
       webSocketService.connect().catch(error => {
         console.error('Failed to connect WebSocket:', error.message || error);
-        setError('Real-time features may be limited. Please refresh if issues persist.');
+        setError(
+          'Real-time features may be limited. Please refresh if issues persist.',
+        );
       });
     }
 
@@ -743,7 +868,7 @@ export const useMessages = (channelId: string) => {
         currentChannelId: channelId,
         messageId: data.message?.id || data.data?.id,
         messageContent: data.message?.content || data.data?.content,
-        fullData: data
+        fullData: data,
       });
 
       // Handle both channelId and channel_id formats
@@ -763,7 +888,10 @@ export const useMessages = (channelId: string) => {
             // Check if message already exists
             const messageExists = prev.some(msg => msg.id === newMessage.id);
             if (messageExists) {
-              console.log('Duplicate message detected, skipping:', newMessage.id);
+              console.log(
+                'Duplicate message detected, skipping:',
+                newMessage.id,
+              );
               return prev;
             }
             return [...prev, newMessage];
@@ -774,13 +902,15 @@ export const useMessages = (channelId: string) => {
       }
     };
 
-    const handleMessageUpdated = (data: WebSocketMessageEvent & { messageId: string }) => {
+    const handleMessageUpdated = (
+      data: WebSocketMessageEvent & { messageId: string },
+    ) => {
       console.log('📝 WebSocket message_updated event received:', {
         eventChannelId: data.channelId,
         currentChannelId: channelId,
         messageId: data.messageId,
-        hasMessageData: !!(((data as any).data?.message || data.message)),
-        fullData: data
+        hasMessageData: !!((data as any).data?.message || data.message),
+        fullData: data,
       });
 
       if (data.channelId === channelId) {
@@ -793,29 +923,39 @@ export const useMessages = (channelId: string) => {
 
         try {
           const updatedMessage = messageData as Message;
-          console.log('✅ Updating message:', updatedMessage.id, 'with content:', updatedMessage.content);
-          setMessages(prev => prev.map(msg =>
-            msg.id === data.messageId ? updatedMessage : msg
-          ));
+          console.log(
+            '✅ Updating message:',
+            updatedMessage.id,
+            'with content:',
+            updatedMessage.content,
+          );
+          setMessages(prev =>
+            prev.map(msg => (msg.id === data.messageId ? updatedMessage : msg)),
+          );
         } catch (error) {
           console.error('Error processing message_updated event:', error);
         }
       }
     };
 
-    const handleMessageDeleted = (data: { channelId: string; messageId: string }) => {
+    const handleMessageDeleted = (data: any) => {
       console.log('🗑️ WebSocket message_deleted event received:', {
         eventChannelId: data.channelId,
         currentChannelId: channelId,
         messageId: data.messageId,
-        fullData: data
+        fullData: data,
       });
 
       if (data.channelId === channelId) {
-        console.log('✅ Deleting message:', data.messageId);
+        console.log('✅ Deleting message:', data.data.messageId);
         setMessages(prev => {
-          const filtered = prev.filter(msg => msg.id !== data.messageId);
-          console.log('Messages before deletion:', prev.length, 'After deletion:', filtered.length);
+          const filtered = prev.filter(msg => msg.id !== data.data.messageId);
+          console.log(
+            'Messages before deletion:',
+            prev.length,
+            'After deletion:',
+            filtered.length,
+          );
           return filtered;
         });
       }
@@ -824,10 +964,10 @@ export const useMessages = (channelId: string) => {
     // Reaction events
     const handleReactionToggled = (data: WebSocketReactionEvent) => {
       const currentReactions = data.currentReactions || [];
-      const updatedReactions = currentReactions.map((r) => ({
+      const updatedReactions = currentReactions.map(r => ({
         emoji: r.emoji,
         count: r.count,
-        users: r.users.map((u) => ({
+        users: r.users.map(u => ({
           id: u.id,
           name: u.name,
           email: u.email || '',
@@ -835,35 +975,37 @@ export const useMessages = (channelId: string) => {
           isOnline: true,
         })),
       }));
-      
-      setMessages(prev => prev.map(msg => 
-        msg.id === data.messageId 
-          ? { ...msg, reactions: updatedReactions }
-          : msg
-      ));
+
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === data.messageId
+            ? { ...msg, reactions: updatedReactions }
+            : msg,
+        ),
+      );
     };
 
     const handleReactionsCleared = (data: { messageId: string }) => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === data.messageId 
-          ? { ...msg, reactions: [] }
-          : msg
-      ));
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === data.messageId ? { ...msg, reactions: [] } : msg,
+        ),
+      );
     };
 
     // Enhanced typing indicators with proper user management
     const handleTypingIndicator = (data: WebSocketTypingEvent) => {
       if (data.channelId === channelId) {
         const currentUserId = currentUser?.id;
-        
+
         // Don't show typing indicator for current user
         if (data.userId === currentUserId) {
           return;
         }
-        
+
         setTypingUsers(prev => {
           const filtered = prev.filter(u => u.userId !== data.userId);
-          
+
           if (data.isTyping) {
             // Add or update typing user
             const typingUser: TypingUser = {
@@ -873,7 +1015,7 @@ export const useMessages = (channelId: string) => {
               isTyping: true,
               lastTypingTime: Date.now(),
             };
-            
+
             return [...filtered, typingUser];
           } else {
             // Remove typing user
@@ -890,7 +1032,7 @@ export const useMessages = (channelId: string) => {
     webSocketService.on('reaction_toggled', handleReactionToggled);
     webSocketService.on('reactions_cleared', handleReactionsCleared);
     webSocketService.on('typing_indicator', handleTypingIndicator);
-    
+
     // Enhanced connection state handling
     const handleConnectionStateChange = () => {
       const connectionState = webSocketService.getConnectionState();
@@ -906,47 +1048,49 @@ export const useMessages = (channelId: string) => {
         }
       }
     };
-    
+
     const handleMaxReconnectAttemptsReached = () => {
-      setError('Connection lost. Please check your internet connection and refresh the page.');
+      setError(
+        'Connection lost. Please check your internet connection and refresh the page.',
+      );
     };
-    
-    const handleSyncResponse = (data: { 
-      messages: Message[]; 
+
+    const handleSyncResponse = (data: {
+      messages: Message[];
       reactions: Array<{
         message_id: string;
         reactions: any[];
       }>;
     }) => {
-      
       try {
         if (data.messages && data.messages.length > 0) {
-          const syncedMessages = data.messages
-            .filter(msg => {
-              // Skip null/undefined messages
-              if (!msg) {
-                return false;
-              }
-              
-              // Only process messages for current channel
-              return msg.channel_id === channelId;
-            }) as Message[]; // No transformation needed
-          
+          const syncedMessages = data.messages.filter(msg => {
+            // Skip null/undefined messages
+            if (!msg) {
+              return false;
+            }
+
+            // Only process messages for current channel
+            return msg.channel_id === channelId;
+          }) as Message[]; // No transformation needed
+
           if (syncedMessages.length > 0) {
             updateMessages(prev => [...syncedMessages, ...prev]);
           }
         }
-        
+
         // Handle synced reactions if needed
         if (data.reactions) {
           // Update reactions in existing messages
           data.reactions.forEach(reactionUpdate => {
             if (reactionUpdate && reactionUpdate.message_id) {
-              updateMessages(prev => prev.map(msg => 
-                msg.id === reactionUpdate.message_id 
-                  ? { ...msg, reactions: reactionUpdate.reactions || [] }
-                  : msg
-              ));
+              updateMessages(prev =>
+                prev.map(msg =>
+                  msg.id === reactionUpdate.message_id
+                    ? { ...msg, reactions: reactionUpdate.reactions || [] }
+                    : msg,
+                ),
+              );
             }
           });
         }
@@ -954,11 +1098,14 @@ export const useMessages = (channelId: string) => {
         console.error('❌ Error processing sync response:', error);
       }
     };
-    
+
     // Register enhanced event listeners
     webSocketService.on('connect', handleConnectionStateChange);
     webSocketService.on('disconnect', handleConnectionStateChange);
-    webSocketService.on('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+    webSocketService.on(
+      'max_reconnect_attempts_reached',
+      handleMaxReconnectAttemptsReached,
+    );
     webSocketService.on('sync_response', handleSyncResponse);
 
     return () => {
@@ -971,9 +1118,12 @@ export const useMessages = (channelId: string) => {
       webSocketService.off('typing_indicator', handleTypingIndicator);
       webSocketService.off('connect', handleConnectionStateChange);
       webSocketService.off('disconnect', handleConnectionStateChange);
-      webSocketService.off('max_reconnect_attempts_reached', handleMaxReconnectAttemptsReached);
+      webSocketService.off(
+        'max_reconnect_attempts_reached',
+        handleMaxReconnectAttemptsReached,
+      );
       webSocketService.off('sync_response', handleSyncResponse);
-      
+
       // Leave channel
       webSocketService.leaveChannel(channelId);
     };
@@ -982,7 +1132,7 @@ export const useMessages = (channelId: string) => {
   // Load initial messages when channel changes
   useEffect(() => {
     const loadKey = `${channelId}-channel`;
-    
+
     if (loadedRef.current !== loadKey && loadMessagesRef.current) {
       // Reset state for new channel
       setMessages([]);
@@ -999,7 +1149,7 @@ export const useMessages = (channelId: string) => {
         nextCursor: null,
         isInitialLoad: true,
       });
-      
+
       // Use the ref to avoid dependency issues
       loadMessagesRef.current();
     }
@@ -1010,16 +1160,19 @@ export const useMessages = (channelId: string) => {
     const interval = setInterval(() => {
       const now = Date.now();
       const TYPING_TIMEOUT = 5000; // 5 seconds
-      
+
       setTypingUsers(prev => {
         const filtered = prev.filter(u => {
-          const isStale = !u.lastTypingTime || (now - u.lastTypingTime) > TYPING_TIMEOUT;
+          const isStale =
+            !u.lastTypingTime || now - u.lastTypingTime > TYPING_TIMEOUT;
           if (isStale && u.isTyping) {
-            console.log(`🧹 Removing stale typing indicator for user: ${u.userName}`);
+            console.log(
+              `🧹 Removing stale typing indicator for user: ${u.userName}`,
+            );
           }
           return !isStale;
         });
-        
+
         // Only update state if there's a change to prevent unnecessary re-renders
         return filtered.length !== prev.length ? filtered : prev;
       });
@@ -1027,13 +1180,13 @@ export const useMessages = (channelId: string) => {
 
     return () => {
       clearInterval(interval);
-      
+
       // Clean up all typing-related timeouts
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-      
+
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
         typingDebounceRef.current = null;
@@ -1044,22 +1197,21 @@ export const useMessages = (channelId: string) => {
   // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
-    
+
     return () => {
       isMountedRef.current = false;
-      
+
       // Cancel any ongoing requests
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-      
+
       // Clear typing timeout
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
     };
   }, []);
-
 
   // Force reconnection function
   const forceReconnect = useCallback(async () => {
@@ -1099,4 +1251,3 @@ export const useMessages = (channelId: string) => {
     deletingMessages,
   };
 };
-

@@ -1,4 +1,10 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react';
 import {
   View,
   Text,
@@ -54,7 +60,6 @@ export const MessageList: React.FC<MessageListProps> = ({
   const flatListRef = useRef<FlatList>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollToBottomOpacity = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
     Animated.timing(scrollToBottomOpacity, {
       toValue: showScrollToBottom ? 1 : 0,
@@ -73,69 +78,104 @@ export const MessageList: React.FC<MessageListProps> = ({
     }
   }, []);
 
-  const shouldShowDateSeparator = useCallback((currentMessage: MessageType, previousMessage?: MessageType): boolean => {
-    if (!previousMessage) return true;
-    return !isSameDay(new Date(currentMessage.created_at), new Date(previousMessage.created_at));
-  }, []);
+  const shouldShowDateSeparator = useCallback(
+    (currentMessage: MessageType, previousMessage?: MessageType): boolean => {
+      if (!previousMessage) return true;
+      return !isSameDay(
+        new Date(currentMessage.created_at),
+        new Date(previousMessage.created_at),
+      );
+    },
+    [],
+  );
 
-  const shouldGroupMessage = useCallback((currentMessage: MessageType, previousMessage?: MessageType): boolean => {
-    if (!previousMessage) return false;
-    if (currentMessage?.user_id !== previousMessage?.user_id) return false;
-    
-    const timeDiff = new Date(previousMessage.created_at).getTime() - new Date(currentMessage.created_at).getTime();
-    return timeDiff < 300000; // 5 minutes
-  }, []);
+  const shouldGroupMessage = useCallback(
+    (currentMessage: MessageType, previousMessage?: MessageType): boolean => {
+      if (!previousMessage) return false;
+      if (currentMessage?.user_id !== previousMessage?.user_id) return false;
+
+      const timeDiff =
+        new Date(previousMessage.created_at).getTime() -
+        new Date(currentMessage.created_at).getTime();
+      return timeDiff < 300000; // 5 minutes
+    },
+    [],
+  );
 
   const handleScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const isNearBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
-    setShowScrollToBottom(!isNearBottom && contentSize.height > layoutMeasurement.height + 200);
+    const isNearBottom =
+      contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+    setShowScrollToBottom(
+      !isNearBottom && contentSize.height > layoutMeasurement.height + 200,
+    );
   }, []);
 
   const scrollToBottom = useCallback(() => {
     if (flatListRef.current && messages.length > 0) {
-      flatListRef.current.scrollToIndex({ index: messages.length - 1, animated: true });
+      flatListRef.current.scrollToIndex({
+        index: messages.length - 1,
+        animated: true,
+      });
       onScrollToBottom?.();
     }
   }, [messages.length, onScrollToBottom]);
 
-  const renderDateSeparator = useCallback((date: Date) => (
-    <View className="items-center py-4">
-      <View className="bg-gray-100 rounded-full px-3 py-1">
-        <Text className="text-gray-600 text-sm font-medium">
-          {formatDateSeparator(date)}
-        </Text>
+  const renderDateSeparator = useCallback(
+    (date: Date) => (
+      <View className="items-center py-4">
+        <View className="bg-gray-100 rounded-full px-3 py-1">
+          <Text className="text-gray-600 text-sm font-medium">
+            {formatDateSeparator(date)}
+          </Text>
+        </View>
       </View>
-    </View>
-  ), [formatDateSeparator]);
+    ),
+    [formatDateSeparator],
+  );
 
-  const renderMessage = useCallback(({ item, index }: { item: MessageType; index: number }) => {
-    const previousMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
-    const isGrouped = shouldGroupMessage(item, previousMessage);
-    const showDateSeparator = shouldShowDateSeparator(item, previousMessage);
+  const renderMessage = useCallback(
+    ({ item, index }: { item: MessageType; index: number }) => {
+      const previousMessage =
+        index < messages.length - 1 ? messages[index + 1] : undefined;
+      const isGrouped = shouldGroupMessage(item, previousMessage);
+      const showDateSeparator = shouldShowDateSeparator(item, previousMessage);
 
-    return (
-      <View key={`message-container-${item.id}`}>
-        {showDateSeparator && (
-          <View key={`date-separator-${item.id}`}>
-            {renderDateSeparator(new Date(item.created_at))}
-          </View>
-        )}
-        <Message
-          key={`message-${item.id}`}
-          message={item}
-          currentUserId={currentUserId}
-          showAvatar={true}
-          isGrouped={isGrouped}
-          onReply={onReply}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onReaction={onReaction}
-          onUserPress={onUserPress}
-        />
-      </View>
-    );
-  }, [messages.length, shouldGroupMessage, shouldShowDateSeparator, renderDateSeparator, currentUserId, onReply, onEdit, onDelete, onReaction, onUserPress]);
+      return (
+        <View key={`message-container-${item.id}`}>
+          {showDateSeparator && (
+            <View key={`date-separator-${item.id}`}>
+              {renderDateSeparator(new Date(item.created_at))}
+            </View>
+          )}
+          <Message
+            key={`message-${item.id}`}
+            message={item}
+            currentUserId={currentUserId}
+            showAvatar={true}
+            isGrouped={isGrouped}
+            onReply={onReply}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onReaction={onReaction}
+            onUserPress={onUserPress}
+          />
+        </View>
+      );
+    },
+    [
+      messages.length,
+      shouldGroupMessage,
+      shouldShowDateSeparator,
+      renderDateSeparator,
+      currentUserId,
+      onReply,
+      onEdit,
+      onDelete,
+      onReaction,
+      onUserPress,
+    ],
+  );
 
   const renderHeader = useCallback(() => {
     if (!hasMoreMessages) {
@@ -158,7 +198,9 @@ export const MessageList: React.FC<MessageListProps> = ({
       return (
         <View className="items-center py-6">
           <MaterialIcon name="refresh" size={24} color="#6B7280" />
-          <Text className="text-gray-500 text-sm mt-2">Loading more messages...</Text>
+          <Text className="text-gray-500 text-sm mt-2">
+            Loading more messages...
+          </Text>
         </View>
       );
     }
@@ -175,31 +217,37 @@ export const MessageList: React.FC<MessageListProps> = ({
 
   const keyExtractor = useCallback((item: MessageType) => item.id, []);
 
-  const getItemLayout = useMemo(() => (data: any, index: number) => ({
-    length: 80, // Approximate message height
-    offset: 80 * index,
-    index,
-  }), []);
+  const getItemLayout = useMemo(
+    () => (data: any, index: number) => ({
+      length: 80, // Approximate message height
+      offset: 80 * index,
+      index,
+    }),
+    [],
+  );
 
-  const renderError = useCallback(() => (
-    <View className="flex-1 items-center justify-center p-6">
-      <View className="bg-red-50 rounded-full p-3 mb-4">
-        <MaterialIcon name="error-outline" size={32} color="#EF4444" />
+  const renderError = useCallback(
+    () => (
+      <View className="flex-1 items-center justify-center p-6">
+        <View className="bg-red-50 rounded-full p-3 mb-4">
+          <MaterialIcon name="error-outline" size={32} color="#EF4444" />
+        </View>
+        <Text className="text-gray-900 font-semibold text-lg mb-2">
+          Something went wrong
+        </Text>
+        <Text className="text-gray-500 text-center mb-4">
+          {error || 'Failed to load messages. Please try again.'}
+        </Text>
+        <TouchableOpacity
+          onPress={onRetry}
+          className="bg-blue-600 px-6 py-3 rounded-lg"
+        >
+          <Text className="text-white font-medium">Try Again</Text>
+        </TouchableOpacity>
       </View>
-      <Text className="text-gray-900 font-semibold text-lg mb-2">
-        Something went wrong
-      </Text>
-      <Text className="text-gray-500 text-center mb-4">
-        {error || 'Failed to load messages. Please try again.'}
-      </Text>
-      <TouchableOpacity
-        onPress={onRetry}
-        className="bg-blue-600 px-6 py-3 rounded-lg"
-      >
-        <Text className="text-white font-medium">Try Again</Text>
-      </TouchableOpacity>
-    </View>
-  ), [error, onRetry]);
+    ),
+    [error, onRetry],
+  );
 
   // Show error state
   if (error && messages.length === 0) {
@@ -250,12 +298,14 @@ export const MessageList: React.FC<MessageListProps> = ({
       <Animated.View
         style={{
           opacity: scrollToBottomOpacity,
-          transform: [{
-            translateY: scrollToBottomOpacity.interpolate({
-              inputRange: [0, 1],
-              outputRange: [50, 0],
-            }),
-          }],
+          transform: [
+            {
+              translateY: scrollToBottomOpacity.interpolate({
+                inputRange: [0, 1],
+                outputRange: [50, 0],
+              }),
+            },
+          ],
         }}
         className="absolute bottom-4 right-4"
         pointerEvents={showScrollToBottom ? 'auto' : 'none'}
