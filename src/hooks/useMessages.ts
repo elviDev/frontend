@@ -788,16 +788,26 @@ export const useMessages = (channelId: string) => {
     };
 
     const handleMessageUpdated = (data: WebSocketMessageEvent & { messageId: string }) => {
+      console.log('📝 WebSocket message_updated event received:', {
+        eventChannelId: data.channelId,
+        currentChannelId: channelId,
+        messageId: data.messageId,
+        hasMessageData: !!(((data as any).data?.message || data.message)),
+        fullData: data
+      });
+
       if (data.channelId === channelId) {
         // Validate that message data exists - handle different data structures
         let messageData = (data as any).data?.message || data.message;
         if (!messageData) {
+          console.log('❌ No message data found in message_updated event');
           return;
         }
-        
+
         try {
           const updatedMessage = messageData as Message;
-          setMessages(prev => prev.map(msg => 
+          console.log('✅ Updating message:', updatedMessage.id, 'with content:', updatedMessage.content);
+          setMessages(prev => prev.map(msg =>
             msg.id === data.messageId ? updatedMessage : msg
           ));
         } catch (error) {
@@ -807,8 +817,20 @@ export const useMessages = (channelId: string) => {
     };
 
     const handleMessageDeleted = (data: { channelId: string; messageId: string }) => {
+      console.log('🗑️ WebSocket message_deleted event received:', {
+        eventChannelId: data.channelId,
+        currentChannelId: channelId,
+        messageId: data.messageId,
+        fullData: data
+      });
+
       if (data.channelId === channelId) {
-        setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
+        console.log('✅ Deleting message:', data.messageId);
+        setMessages(prev => {
+          const filtered = prev.filter(msg => msg.id !== data.messageId);
+          console.log('Messages before deletion:', prev.length, 'After deletion:', filtered.length);
+          return filtered;
+        });
       }
     };
 
