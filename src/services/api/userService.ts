@@ -81,15 +81,8 @@ class UserService {
       // Cache the token
       this.tokenCache = { token, timestamp: now };
       
-      console.log('🔑 UserService: Token retrieval result:', {
-        hasToken: !!token,
-        tokenLength: token ? token.length : 0,
-        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none',
-        fromCache: false
-      });
-      
       if (!token) {
-        console.warn('🔑 UserService: No token available, user may need to login');
+        console.warn('UserService: No token available, user may need to login');
       }
       
       return token;
@@ -113,19 +106,13 @@ class UserService {
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-      console.log('🔑 UserService: Authorization header set with token');
     } else {
-      console.warn('🔑 UserService: Making request WITHOUT authorization header - this will likely fail');
+      console.warn('UserService: Making request WITHOUT authorization header - this will likely fail');
     }
 
 
 
     const baseUrl = API_BASE_URL;
-    console.log(`🌐 UserService: Making request to ${baseUrl}/${endpoint}`, {
-      method: options.method || 'GET',
-      hasAuthHeader: !!headers.Authorization,
-      endpoint
-    });
     
     try {
       const controller = new AbortController();
@@ -139,13 +126,12 @@ class UserService {
 
       clearTimeout(timeoutId);
 
-      console.log(`📈 UserService: Response status: ${response.status} for ${endpoint}`);
 
       let data;
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error('📈 UserService: Failed to parse response JSON:', parseError);
+        console.error('UserService: Failed to parse response JSON:', parseError);
         throw new AuthError(
           'Server returned an invalid response. Please try again.',
           'INVALID_RESPONSE',
@@ -157,19 +143,16 @@ class UserService {
         const errorMessage = data.error?.message || `Request failed with status ${response.status}`;
         const errorCode = data.error?.code || 'REQUEST_FAILED';
         
-        console.error(`❌ UserService: API Error ${response.status}:`, {
+        console.error(`UserService: API Error ${response.status}:`, {
           errorMessage,
           errorCode,
-          endpoint,
-          hasToken: !!token,
-          tokenLength: token ? token.length : 0
+          endpoint
         });
 
         // Handle 401/403 errors
         if (response.status === 401 || response.status === 403) {
           // Try server token refresh once
           if (retryCount === 0) {
-            console.log('🔄 UserService: Got 401/403, attempting server token refresh...');
             try {
               // Clear token cache before refresh
               this.tokenCache = { token: null, timestamp: 0 };
@@ -180,10 +163,9 @@ class UserService {
                 throw new Error('Failed to obtain new token');
               }
               
-              console.log('🔄 UserService: Server token refresh successful, retrying request...');
               return this.makeRequest(endpoint, options, 1);
             } catch (refreshError) {
-              console.error('🔄 UserService: Server token refresh failed:', refreshError);
+              console.error('UserService: Server token refresh failed:', refreshError);
               throw new AuthError('Session expired. Please log in again.', 'SESSION_EXPIRED', 401);
             }
           }
@@ -192,14 +174,12 @@ class UserService {
         throw new AuthError(errorMessage, errorCode, response.status);
       }
 
-      console.log('✅ UserService: Request successful:', endpoint);
       return data;
     } catch (error: any) {
-      console.error('❌ UserService: Request failed:', {
+      console.error('UserService: Request failed:', {
         error: error.message,
         endpoint,
-        retryCount,
-        hasToken: !!token
+        retryCount
       });
       
       if (error.name === 'AbortError') {

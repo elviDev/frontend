@@ -151,19 +151,7 @@ class ChannelService {
       // Cache the token
       this.tokenCache = { token, timestamp: now };
       
-      console.log('🔑 ChannelService: Token retrieval result:', {
-        hasToken: !!token,
-        tokenLength: token ? token.length : 0,
-        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none',
-        fromCache: false
-      });
       
-      // Additional validation
-      if (!token) {
-        console.warn('🔑 ChannelService: No token available, user may need to login');
-        const tokenInfo = await tokenManager.getTokenInfo();
-        console.log('🔑 ChannelService: Token info:', tokenInfo);
-      }
       
       return token;
     } catch (error) {
@@ -182,7 +170,6 @@ class ChannelService {
     
     // Check if identical request is already in progress
     if (this.pendingRequests.has(requestKey)) {
-      console.log(`🔄 ChannelService: Deduplicating request to ${endpoint}`);
       return this.pendingRequests.get(requestKey)!;
     }
 
@@ -195,19 +182,11 @@ class ChannelService {
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-      console.log('🔑 ChannelService: Authorization header set with token');
-    } else {
-      console.warn('🔑 ChannelService: Making request WITHOUT authorization header - this will likely fail');
     }
 
 
 
     const baseUrl = API_BASE_URL;
-    console.log(`🌐 ChannelService: Making request to ${baseUrl}/${endpoint}`, {
-      method: options.method || 'GET',
-      hasAuthHeader: !!headers.Authorization,
-      endpoint
-    });
     
     // Create and cache the request promise
     const requestPromise = this.executeRequest<T>(baseUrl, endpoint, options, headers, token, retryCount);
@@ -242,13 +221,12 @@ class ChannelService {
 
       clearTimeout(timeoutId);
 
-      console.log(`📈 ChannelService: Response status: ${response.status} for ${endpoint}`);
 
       let data;
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error('📈 ChannelService: Failed to parse response JSON:', parseError);
+        console.error('ChannelService: Failed to parse response JSON:', parseError);
         throw new AuthError(
           'Server returned an invalid response. Please try again.',
           'INVALID_RESPONSE',
@@ -260,25 +238,21 @@ class ChannelService {
         const errorMessage = data.error?.message || `Request failed with status ${response.status}`;
         const errorCode = data.error?.code || 'REQUEST_FAILED';
         
-        console.error(`❌ ChannelService: API Error ${response.status}:`, {
+        console.error(`ChannelService: API Error ${response.status}:`, {
           errorMessage,
           errorCode,
-          endpoint,
-          hasToken: !!token,
-          tokenLength: token ? token.length : 0
+          endpoint
         });
 
         // Handle 401/403 errors
         if (response.status === 401 || response.status === 403) {
           // For 403 on member endpoints, this might be a permission issue, not auth issue
           if (response.status === 403 && endpoint.includes('/members')) {
-            console.log(`🔒 ChannelService: Access denied to ${endpoint} (insufficient permissions)`);
             throw new AuthError('Insufficient permissions to access this resource', 'ACCESS_DENIED', 403);
           }
           
           // For other 401/403, try token refresh once
           if (retryCount === 0) {
-            console.log('🔄 ChannelService: Got 401/403, attempting server token refresh...');
             try {
               // Clear token cache before refresh
               this.tokenCache = { token: null, timestamp: 0 };
@@ -289,10 +263,9 @@ class ChannelService {
                 throw new Error('Failed to obtain new token');
               }
               
-              console.log('🔄 ChannelService: Server token refresh successful, retrying request...');
               return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
             } catch (refreshError) {
-              console.error('🔄 ChannelService: Server token refresh failed:', refreshError);
+              console.error('ChannelService: Server token refresh failed:', refreshError);
               throw new AuthError('Session expired. Please log in again.', 'SESSION_EXPIRED', 401);
             }
           }
@@ -301,14 +274,12 @@ class ChannelService {
         throw new AuthError(errorMessage, errorCode, response.status);
       }
 
-      console.log('✅ ChannelService: Request successful:', endpoint);
       return data;
     } catch (error: any) {
-      console.error('❌ ChannelService: Request failed:', {
+      console.error('ChannelService: Request failed:', {
         error: error.message,
         endpoint,
-        retryCount,
-        hasToken: !!token
+        retryCount
       });
       
       if (error.name === 'AbortError') {
@@ -578,7 +549,6 @@ class ChannelService {
     memberCount: number;
   }> {
     try {
-      console.log('🔍 Fetching channel stats for:', channelId);
       
       // Message stats will be available from channel API when messages are re-implemented
       
@@ -587,30 +557,9 @@ class ChannelService {
         this.getChannelMembers(channelId, { limit: 1, offset: 0 })
       ]);
 
-      // Enhanced logging for debugging
-      console.log('📈 Stats responses:', {
-        messages: 'disabled - will be re-implemented',
-        files: filesResponse.status === 'fulfilled' ? 'success' : filesResponse.reason,
-        members: membersResponse.status === 'fulfilled' ? 'success' : membersResponse.reason,
-      });
 
       // Messages logging disabled - will be re-implemented
 
-      if (filesResponse.status === 'fulfilled') {
-        console.log('📁 Files response structure:', {
-          hasPagination: !!filesResponse.value?.pagination,
-          total: filesResponse.value?.pagination?.total,
-          structure: Object.keys(filesResponse.value || {}),
-        });
-      }
-
-      if (membersResponse.status === 'fulfilled') {
-        console.log('👥 Members response structure:', {
-          hasPagination: !!membersResponse.value?.pagination,
-          total: membersResponse.value?.pagination?.total,
-          structure: Object.keys(membersResponse.value || {}),
-        });
-      }
 
       const messageCount = 0; // Will be available when messages are re-implemented
         
@@ -628,11 +577,10 @@ class ChannelService {
         memberCount,
       };
 
-      console.log('📊 Final channel stats:', stats);
       
       return stats;
     } catch (error) {
-      console.error('❌ Failed to fetch channel stats:', error);
+      console.error('Failed to fetch channel stats:', error);
       // Return actual zeros instead of mock data for accurate display
       return {
         messageCount: 0,
@@ -650,7 +598,6 @@ class ChannelService {
     fileCount: number;
   })[]> {
     try {
-      console.log('🔄 Fetching channels with minimal API requests...');
       const channels = await this.getChannels();
       
       if (channels.length === 0) {
@@ -667,10 +614,9 @@ class ChannelService {
         };
       });
 
-      console.log(`✅ Successfully loaded ${channels.length} channels with 1 total request (optimized)`);
       return channelsWithStats;
     } catch (error) {
-      console.error('❌ Failed to fetch channels with stats:', error);
+      console.error('Failed to fetch channels with stats:', error);
       return [];
     }
   }
@@ -804,7 +750,7 @@ class ChannelService {
       const response = await this.makeRequest<PaginatedResponse<any>>(`/channels/${channelId}/files?${queryParams}`);
       return response; // Return full response instead of just data
     } catch (error: any) {
-      console.warn(`📁 ChannelService: Failed to load files for channel ${channelId}, returning empty list:`, error.message);
+      console.warn(`ChannelService: Failed to load files for channel ${channelId}, returning empty list:`, error.message);
       
       // Return empty paginated response instead of throwing error
       return {
@@ -844,7 +790,7 @@ class ChannelService {
       const response = await this.makeRequest<PaginatedResponse<any>>(`/channels/${channelId}/activity?${queryParams}`);
       return response.data;
     } catch (error: any) {
-      console.warn(`📊 ChannelService: Failed to load activity for channel ${channelId}, returning empty list:`, error.message);
+      console.warn(`ChannelService: Failed to load activity for channel ${channelId}, returning empty list:`, error.message);
       return [];
     }
   }

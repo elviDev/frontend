@@ -67,7 +67,6 @@ export const Message: React.FC<MessageProps> = ({
     );
   }``
 
-  console.log('Rendering message:', message.id, message);
   // Handle missing user_details gracefully
   const userDetails = {
     id: message.user_id,
@@ -323,10 +322,9 @@ export const Message: React.FC<MessageProps> = ({
         onClose={() => setShowEmojiPicker(false)}
         onEmojiSelect={(emoji) => {
           try {
-            console.log('💬 Message: Emoji selected for message:', message.id, emoji);
             onReaction?.(message.id, emoji);
           } catch (error) {
-            console.error('🚨 Message: Error calling onReaction:', error);
+            console.error('Error calling onReaction:', error);
           }
         }}
       />

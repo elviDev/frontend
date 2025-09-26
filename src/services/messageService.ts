@@ -33,20 +33,13 @@ class MessageService {
       // Cache the token
       this.tokenCache = { token, timestamp: now };
       
-      console.log('🔑 MessageService: Token retrieval result:', {
-        hasToken: !!token,
-        tokenLength: token ? token.length : 0,
-        tokenPrefix: token ? token.substring(0, 20) + '...' : 'none',
-        fromCache: false
-      });
-      
       if (!token) {
-        console.warn('🔑 MessageService: No token available, user may need to login');
+        console.warn('MessageService: No token available, user may need to login');
       }
       
       return token;
     } catch (error) {
-      console.error('🔑 MessageService: Failed to get auth token:', error);
+      console.error('MessageService: Failed to get auth token:', error);
       return null;
     }
   }
@@ -66,7 +59,6 @@ class MessageService {
   private handleAuthError(error: any): void {
     // Clear token cache on authentication errors
     if (error.error?.statusCode === 401 || error.error?.statusCode === 403) {
-      console.log('🔄 MessageService: Clearing token cache due to auth error');
       this.tokenCache = { token: null, timestamp: 0 };
     }
   }
@@ -87,12 +79,12 @@ class MessageService {
         const isRetryableError = this.isRetryableError(error);
         
         if (isLastAttempt || !isRetryableError) {
-          console.error(`❌ ${operationName} failed after ${attempt + 1} attempts:`, error);
+          console.error(`${operationName} failed after ${attempt + 1} attempts:`, error);
           throw error;
         }
         
         const delayMs = this.retryDelay * Math.pow(2, attempt); // Exponential backoff
-        console.warn(`⚠️ ${operationName} attempt ${attempt + 1} failed, retrying in ${delayMs}ms:`, error.message);
+        console.warn(`${operationName} attempt ${attempt + 1} failed, retrying in ${delayMs}ms:`, error.message);
         await this.delay(delayMs);
       }
     }
@@ -154,18 +146,15 @@ class MessageService {
     // Check cache first
     const cached = this.cache.get(cacheKey);
     if (cached && this.isValidCache(cached)) {
-      console.log('📦 Cache hit for:', cacheKey);
       return cached.data;
     }
 
     // Check for pending request (deduplication)
     if (this.pendingRequests.has(cacheKey)) {
-      console.log('🔄 Request deduplication for:', cacheKey);
       return this.pendingRequests.get(cacheKey)!;
     }
 
     // Create new request
-    console.log('🌐 Cache miss, fetching:', cacheKey);
     const request = fetcher().finally(() => {
       this.pendingRequests.delete(cacheKey);
     });
@@ -223,7 +212,6 @@ class MessageService {
     if (!response.ok) {
       // Handle 404 as empty result rather than error for message endpoints
       if (response.status === 404 && data?.error?.message?.toLowerCase().includes('not found')) {
-        console.log('📭 No content found, returning empty result');
         return {
           success: true,
           data: [] as T,
@@ -262,9 +250,6 @@ class MessageService {
       });
 
       const url = `${API_BASE_URL}/channels/${channelId}/messages?${params}`;
-      console.log('📡 MessageService: Fetching channel messages');
-      console.log('🔗 URL:', url);
-      console.log('📋 Options:', options);
       
       const headers = await this.getAuthHeaders();
 
@@ -274,10 +259,7 @@ class MessageService {
           headers,
         });
 
-        console.log('📥 Response status:', response.status, response.statusText);
-        
         const result = await this.handleResponse<Message[]>(response);
-        console.log('✅ MessageService: Channel messages loaded successfully', result);
         return result;
       }, 'getChannelMessages');
     }, ttl);
@@ -380,22 +362,11 @@ class MessageService {
     const url = `${API_BASE_URL}/channels/${channelId}/messages/${messageId}/reactions`;
     const requestBody = { emoji };
     
-    console.log('📡 MessageService toggleReaction:', {
-      url,
-      method: 'POST',
-      body: requestBody,
-      channelId,
-      messageId,
-      emoji
-    });
-    
     const response = await fetch(url, {
       method: 'POST',
       headers: await this.getAuthHeaders(),
       body: JSON.stringify(requestBody),
     });
-    
-    console.log('📡 MessageService raw response status:', response.status, response.statusText);
 
     return this.handleResponse<any>(response);
   }

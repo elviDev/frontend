@@ -27,11 +27,10 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({
 }) => {
   const handleEmojiPress = (emoji: string) => {
     try {
-      console.log('🎭 EmojiPicker: Emoji selected:', emoji);
       onEmojiSelect(emoji);
       onClose();
     } catch (error) {
-      console.error('🚨 EmojiPicker: Error selecting emoji:', error);
+      console.error('Error selecting emoji:', error);
       onClose();
     }
   };

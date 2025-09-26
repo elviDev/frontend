@@ -141,14 +141,11 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     });
     
     try {
-      console.log('🔄 Loading available members from API...');
-      
       // Get current user first to include them in the list
       const currentUser = await userService.getCurrentUser();
       
       // Get list of users
       const usersResponse = await userService.getUsers({ limit: 50 });
-      console.log('✅ Members loaded:', usersResponse.users.length, 'users');
       
       // Convert User objects to Member format
       const members: Member[] = usersResponse.users.map(user => ({
@@ -174,7 +171,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         setAvailableMembers(otherMembers);
       }
     } catch (error) {
-      console.error('❌ Failed to load available members:', error);
+      console.error('Failed to load available members:', error);
       // Set empty state when unable to load members
       setAvailableMembers([]);
       showError('Unable to load team members. Please try again later.');
@@ -187,9 +184,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   // Load categories from API
   const loadCategories = useCallback(async () => {
     try {
-      console.log('🔄 Loading categories from API...');
       const apiCategories = await channelService.getChannelCategories();
-      console.log('✅ Categories loaded:', apiCategories.length, 'categories');
       
       // Calculate channel counts for each category
       const categoriesWithCounts: Category[] = apiCategories.map(category => ({
@@ -202,7 +197,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       
       setCategories(categoriesWithCounts);
     } catch (error) {
-      console.error('❌ Failed to load categories:', error);
+      console.error('Failed to load categories:', error);
       // Set empty state when unable to load categories
       setCategories([]);
     }
@@ -217,9 +212,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       
       // Fetch channels with statistics from API
       try {
-        console.log('🔄 Loading channels with statistics...');
         const apiChannelsWithStats = await channelService.getChannelsWithStats();
-        console.log('📊 Channels with stats loaded:', apiChannelsWithStats.length, 'channels');
         
         // Use member_details from API response directly
         const displayChannels: Channel[] = apiChannelsWithStats.map((apiChannel) => {
@@ -365,8 +358,6 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     }
 
     try {
-      console.log('🚀 Submitting channel data:', formData);
-      
       const channelData = {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
@@ -377,8 +368,6 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         ...(formData.color && { color: formData.color }),
         settings: formData.settings,
       };
-      
-      console.log('📤 API payload:', channelData);
 
       if (isEditMode && editingChannelId) {
         // Edit existing channel
@@ -396,7 +385,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       resetForm();
       setShowCreateChannel(false);
     } catch (error) {
-      console.error(`❌ Failed to ${isEditMode ? 'update' : 'create'} channel:`, {
+      console.error(`Failed to ${isEditMode ? 'update' : 'create'} channel:`, {
         error: error instanceof Error ? error.message : error,
         formData,
         channelData: {
@@ -509,8 +498,6 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   };
 
   const handleChannelOptions = (channel: DisplayChannel) => {
-    console.log('Three dots clicked for channel:', channel.title);
-    
     // Ensure all other modals are closed
     setShowCategoryFilter(false);
     setShowCreateChannel(false);
@@ -908,7 +895,6 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         message={selectedChannelForAction ? `Options for "${selectedChannelForAction.title}"` : ''}
         options={getActionSheetOptions()}
         onClose={() => {
-          console.log('ActionSheet closing');
           setShowActionSheet(false);
           setSelectedChannelForAction(null);
         }}

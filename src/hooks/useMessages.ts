@@ -25,7 +25,8 @@ interface SendMessageParams {
 interface WebSocketMessageEvent {
   channelId?: string;
   channel_id?: string;
-  message: Message;
+  message?: Message;
+  data?: Message;
 }
 
 interface WebSocketReactionEvent {
@@ -67,12 +68,10 @@ export const useMessages = (channelId: string) => {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   
   // Production-grade state management
-  const [messageCache, setMessageCache] = useState<Map<string, Message>>(new Map());
   const [optimisticMessages, setOptimisticMessages] = useState<Set<string>>(new Set());
   const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
   const [editingMessages, setEditingMessages] = useState<Set<string>>(new Set());
   const [deletingMessages, setDeletingMessages] = useState<Set<string>>(new Set());
-  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number>(Date.now());
   
   // Enhanced pagination state with proper cursor-based pagination
   const [pagination, setPagination] = useState({
@@ -91,13 +90,11 @@ export const useMessages = (channelId: string) => {
     
     // If reactions is an object, convert to array
     if (typeof reactions === 'object' && !Array.isArray(reactions)) {
-      console.log('🔄 normalizeMessage: Converting reactions object to array:', reactions);
       reactions = Object.values(reactions);
     }
     
     // Ensure it's an array
     if (!Array.isArray(reactions)) {
-      console.warn('⚠️ normalizeMessage: Reactions is not an array, defaulting to empty array:', reactions);
       reactions = [];
     }
     
@@ -117,18 +114,14 @@ export const useMessages = (channelId: string) => {
     msgs.forEach(msg => {
       // Skip null/undefined messages or messages without IDs
       if (!msg || !msg.id) {
-        console.warn('🚨 Invalid message detected:', msg);
         return;
       }
       
       if (seen.has(msg.id)) {
-        console.warn('🚨 Duplicate message detected:', msg.id);
-        
         // Conflict resolution: prefer non-optimistic over optimistic
         const existing = messageMap.get(msg.id);
         if (existing?.isOptimistic && !msg.isOptimistic) {
           messageMap.set(msg.id, normalizeMessage(msg));
-          console.log('🔄 Resolved conflict: replaced optimistic with real message');
         }
         return;
       }
@@ -140,33 +133,14 @@ export const useMessages = (channelId: string) => {
     return Array.from(messageMap.values());
   }, [normalizeMessage]);
 
-  // Message cache management for better performance
-  const updateMessageCache = useCallback((newMessages: Message[]) => {
-    setMessageCache(prev => {
-      const updated = new Map(prev);
-      newMessages.forEach(msg => {
-        // Only update if message is newer or doesn't exist
-        const existing = updated.get(msg.id);
-        if (!existing || new Date(msg.created_at) >= new Date(existing.created_at)) {
-          updated.set(msg.id, msg);
-        }
-      });
-      return updated;
-    });
-  }, []);
 
-  // Smart message state updater with cache synchronization
+  // Smart message state updater with deduplication
   const updateMessages = useCallback((updater: (prev: Message[]) => Message[]) => {
     setMessages(prev => {
       const updated = updater(prev);
-      const deduplicated = deduplicateMessages(updated);
-      
-      // Update cache
-      updateMessageCache(deduplicated);
-      
-      return deduplicated;
+      return deduplicateMessages(updated);
     });
-  }, [deduplicateMessages, updateMessageCache]);
+  }, [deduplicateMessages]);
 
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadedRef = useRef<string>('');
@@ -176,16 +150,12 @@ export const useMessages = (channelId: string) => {
   const pendingRequestsRef = useRef<Set<string>>(new Set());
   const lastTypingTimestampRef = useRef<number>(0);
   const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttemptRef = useRef<number>(0);
-  const maxReconnectAttempts = 5;
 
   // No transformation needed - use backend data directly
 
 
   const loadMessages = useCallback(async () => {
     const loadKey = `${channelId}-channel`;
-    console.log('🔄 loadMessages called for:', loadKey);
     
     // Cancel any existing load operation
     if (abortControllerRef.current) {
@@ -194,7 +164,6 @@ export const useMessages = (channelId: string) => {
     
     // Check if already loaded or component unmounted
     if (loadedRef.current === loadKey || !isMountedRef.current) {
-      console.log('⏸️ Skipping load - already loaded or unmounted:', { loadedKey: loadedRef.current, mounted: isMountedRef.current });
       return;
     }
 
@@ -202,18 +171,14 @@ export const useMessages = (channelId: string) => {
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
-    console.log('📡 Starting message load...');
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log('📨 Loading channel messages for:', channelId);
       const response = await messageService.getChannelMessages(channelId, {
         limit: 50,
         offset: 0,
       });
-      
-      console.log('📨 Channel messages response:', response);
       
       // Check if operation was aborted
       if (signal.aborted || !isMountedRef.current) return;
@@ -221,7 +186,6 @@ export const useMessages = (channelId: string) => {
       if (response.success || (response.data !== undefined && response.data !== null)) {
         // Handle empty messages array gracefully
         const messagesArray = Array.isArray(response.data) ? response.data : [];
-        console.log('📨 Raw messages from API:', messagesArray);
         // Double-check component is still mounted before updating state
         if (isMountedRef.current) {
           // Sort messages by timestamp (oldest first)
@@ -245,7 +209,6 @@ export const useMessages = (channelId: string) => {
           loadedRef.current = loadKey;
         }
       } else {
-        console.error('❌ Channel messages response not successful:', response);
         if (isMountedRef.current) {
           // Don't show error for empty results, just show empty state
           setMessages([]);
@@ -262,14 +225,7 @@ export const useMessages = (channelId: string) => {
         }
       }
     } catch (err: any) {
-      console.error('💥 Load messages error:', {
-        error: err,
-        message: err.message,
-        stack: err.stack,
-        name: err.name,
-        channelId,
-        apiError: err.error
-      });
+      console.error('Load messages error:', err.message || err);
       
       // Check if this is a "not found" or "no content" type error
       const isEmptyResult = err.error?.statusCode === 404 || 
@@ -280,7 +236,6 @@ export const useMessages = (channelId: string) => {
       
       if (isEmptyResult && isMountedRef.current && !signal.aborted) {
         // Handle empty state gracefully without showing an error
-        console.log('📭 No messages found, showing empty state');
         setMessages([]);
         setHasMoreMessages(false);
         setPagination({
@@ -299,7 +254,6 @@ export const useMessages = (channelId: string) => {
       let errorMessage = 'Failed to load messages';
       if (err.name === 'TypeError' && err.message.includes('Network request failed')) {
         errorMessage = 'Network connection failed. Please check your internet connection or try again later.';
-        console.error('🌐 Network error - backend may not be accessible');
       } else if (err.message?.includes('fetch') || err.message?.includes('network')) {
         errorMessage = 'Connection error. Please check your internet connection and try again.';
       } else if (err.error?.message) {
@@ -313,7 +267,6 @@ export const useMessages = (channelId: string) => {
         setError(errorMessage);
       }
     } finally {
-      console.log('🏁 Load messages finished');
       // Only update loading state if component is still mounted and operation wasn't aborted
       if (isMountedRef.current && !signal.aborted) {
         setIsLoading(false);
@@ -327,29 +280,17 @@ export const useMessages = (channelId: string) => {
   // Enhanced load more with intelligent pagination and caching
   const loadMoreMessages = useCallback(async () => {
     if (isLoadingMore || !hasMoreMessages || !pagination.hasMore) {
-      console.log('🚫 Load more blocked:', {
-        isLoadingMore,
-        hasMoreMessages,
-        paginationHasMore: pagination.hasMore
-      });
       return;
     }
 
     // Enhanced request deduplication with pagination state
     const requestKey = `loadMore-${channelId}-channel-${pagination.offset}-${pagination.nextCursor || 'none'}`;
     if (pendingRequestsRef.current.has(requestKey)) {
-      console.log('🔄 Skipping duplicate loadMore request:', requestKey);
       return;
     }
 
     pendingRequestsRef.current.add(requestKey);
     setIsLoadingMore(true);
-    
-    console.log('📄 Loading more messages:', {
-      currentOffset: pagination.offset,
-      currentCount: messages.length,
-      nextCursor: pagination.nextCursor
-    });
 
     try {
       const requestOptions = {
@@ -364,7 +305,6 @@ export const useMessages = (channelId: string) => {
       if (response.success && isMountedRef.current) {
         // Handle empty messages array gracefully
         const messagesArray = Array.isArray(response.data) ? response.data : [];
-        console.log('📨 Loaded', messagesArray.length, 'more channel messages');
         
         // Smart message merging to prevent duplicates
         updateMessages(prev => [...prev, ...messagesArray]);
@@ -381,10 +321,8 @@ export const useMessages = (channelId: string) => {
         
         setHasMoreMessages(paginationData.hasMore || paginationData.has_more || false);
       }
-      
-      console.log('✅ Load more completed successfully');
     } catch (err: any) {
-      console.error('💥 Failed to load more messages:', err);
+      console.error('Failed to load more messages:', err.message || err);
       
       if (isMountedRef.current) {
         // Check if this is a "not found" or "no content" type error
@@ -396,7 +334,6 @@ export const useMessages = (channelId: string) => {
         
         if (isEmptyResult) {
           // Handle empty state gracefully without showing an error
-          console.log('📭 No more messages found');
           setHasMoreMessages(false);
           setPagination(prev => ({ ...prev, hasMore: false }));
           return;
@@ -430,7 +367,6 @@ export const useMessages = (channelId: string) => {
   ]);
 
   const sendMessage = useCallback(async (params: SendMessageParams, retryCount = 0): Promise<Message | undefined> => {
-    console.log('👤 Current user in sendMessage:', currentUser);
     
     const optimisticId = `optimistic_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     
@@ -484,8 +420,6 @@ export const useMessages = (channelId: string) => {
     // Add optimistic message at the end (newest messages last)
     updateMessages(prev => [...prev, optimisticMessage]);
 
-    console.log('📤 Sending message optimistically:', optimisticId);
-
     try {
       // Send as channel message  
       const response = await messageService.sendMessage(channelId, {
@@ -503,26 +437,16 @@ export const useMessages = (channelId: string) => {
       if (response.success && response.data) {
         // Replace optimistic message with real message from API (no transformation needed)
         const realMessage = response.data as Message;
-        console.log('🔄 Replacing optimistic message with real message:', {
-          optimisticId,
-          realId: realMessage.id,
-          realMessage
-        });
         
         updateMessages(prev => prev.map(msg => 
           msg.id === optimisticId ? realMessage : msg
         ));
         
-        // Update message cache
-        updateMessageCache([realMessage]);
-        
-        console.log('✅ Message sent successfully:', realMessage.id);
         showSuccess('Message sent!');
         
         return realMessage;
       } else if (response.success && !response.data) {
         // Success but no data returned - keep optimistic message as final
-        console.log('✅ Message sent (no server response data), keeping optimistic:', optimisticId);
         updateMessages(prev => prev.map(msg => 
           msg.id === optimisticId 
             ? { ...msg, isOptimistic: false, isSending: false }
@@ -543,8 +467,6 @@ export const useMessages = (channelId: string) => {
       );
       
       if (shouldRetry) {
-        console.log(`🔄 Retrying send (attempt ${retryCount + 1}/3):`, optimisticId);
-        
         // Update message to show retry state
         updateMessages(prev => prev.map(msg => 
           msg.id === optimisticId 
@@ -585,18 +507,16 @@ export const useMessages = (channelId: string) => {
         return updated;
       });
     }
-  }, [showSuccess, showError, currentUser, channelId, updateMessages, updateMessageCache]);
+  }, [showSuccess, showError, currentUser, channelId, updateMessages]);
 
   const editMessage = useCallback(async (messageId: string, content: string, retryCount = 0): Promise<void> => {
     const originalMessage = messages.find(m => m.id === messageId);
     if (!originalMessage) {
-      console.warn('⚠️ Cannot edit message: message not found:', messageId);
       return;
     }
 
     // Prevent editing if already being edited
     if (editingMessages.has(messageId)) {
-      console.warn('⚠️ Cannot edit message: already being edited:', messageId);
       return;
     }
 
@@ -616,8 +536,6 @@ export const useMessages = (channelId: string) => {
       msg.id === messageId ? optimisticMessage : msg
     ));
 
-    console.log('✏️ Editing message optimistically:', messageId);
-
     try {
       const response = await messageService.editMessage(channelId, messageId, content);
       
@@ -633,10 +551,6 @@ export const useMessages = (channelId: string) => {
           msg.id === messageId ? finalMessage : msg
         ));
         
-        // Update message cache
-        updateMessageCache([finalMessage]);
-        
-        console.log('✅ Message edited successfully:', messageId);
         showSuccess('Message updated!');
       } else {
         throw new Error((response as any).error?.message || 'Failed to edit message');
@@ -651,8 +565,6 @@ export const useMessages = (channelId: string) => {
       );
       
       if (shouldRetry) {
-        console.log(`🔄 Retrying edit (attempt ${retryCount + 1}/3):`, messageId);
-        
         // Wait before retry with exponential backoff
         await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
         
@@ -679,18 +591,16 @@ export const useMessages = (channelId: string) => {
         return updated;
       });
     }
-  }, [messages, editingMessages, updateMessages, updateMessageCache, showSuccess, showError]);
+  }, [messages, editingMessages, updateMessages, showSuccess, showError]);
 
   const deleteMessage = useCallback(async (messageId: string, retryCount = 0): Promise<void> => {
     const originalMessage = messages.find(m => m.id === messageId);
     if (!originalMessage) {
-      console.warn('⚠️ Cannot delete message: message not found:', messageId);
       return;
     }
 
     // Prevent deleting if already being deleted
     if (deletingMessages.has(messageId)) {
-      console.warn('⚠️ Cannot delete message: already being deleted:', messageId);
       return;
     }
 
@@ -710,8 +620,6 @@ export const useMessages = (channelId: string) => {
       msg.id === messageId ? optimisticMessage : msg
     ));
 
-    console.log('🗑️ Deleting message optimistically:', messageId);
-
     try {
       const response = await messageService.deleteMessage(channelId, messageId);
       
@@ -719,14 +627,7 @@ export const useMessages = (channelId: string) => {
         // Remove message from list completely on successful delete
         updateMessages(prev => prev.filter(msg => msg.id !== messageId));
         
-        // Update message cache
-        setMessageCache(prev => {
-          const updated = new Map(prev);
-          updated.delete(messageId);
-          return updated;
-        });
         
-        console.log('✅ Message deleted successfully:', messageId);
         showSuccess('Message deleted!');
       } else {
         throw new Error((response as any).error?.message || 'Failed to delete message');
@@ -741,8 +642,6 @@ export const useMessages = (channelId: string) => {
       );
       
       if (shouldRetry) {
-        console.log(`🔄 Retrying delete (attempt ${retryCount + 1}/3):`, messageId);
-        
         // Wait before retry with exponential backoff
         await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
         
@@ -774,21 +673,12 @@ export const useMessages = (channelId: string) => {
 
   const addReaction = useCallback(async (messageId: string, emoji: string): Promise<void> => {
     try {
-      console.log('🎭 addReaction: Starting reaction addition:', { messageId, emoji, currentUserId: currentUser?.id });
-      
       const currentUserId = currentUser?.id || 'current-user';
       const originalMessage = messages.find(m => m.id === messageId);
       
       if (!originalMessage) {
-        console.warn('⚠️ addReaction: Message not found:', messageId);
         return;
       }
-      
-      console.log('🎭 addReaction: Original message found:', {
-        id: originalMessage.id,
-        reactions: originalMessage.reactions,
-        hasReactions: !!originalMessage.reactions
-      });
     
     // Optimistically update UI
     setMessages(prev => prev.map(msg => {
@@ -799,17 +689,13 @@ export const useMessages = (channelId: string) => {
       
       // If reactions is an object, convert to array
       if (typeof reactions === 'object' && !Array.isArray(reactions)) {
-        console.log('🔄 Converting reactions object to array:', reactions);
         reactions = Object.values(reactions);
       }
       
       // Ensure it's an array
       if (!Array.isArray(reactions)) {
-        console.warn('⚠️ Reactions is not an array, defaulting to empty array:', reactions);
         reactions = [];
       }
-      
-      console.log('🎭 Using reactions array:', reactions);
       const existingReaction = reactions.find(r => r.emoji === emoji);
       const userAlreadyReacted = existingReaction?.users.some((u: any) => u.id === currentUserId);
 
@@ -867,12 +753,9 @@ export const useMessages = (channelId: string) => {
     }));
 
     try {
-      console.log('📡 Calling toggleReaction API:', { channelId, messageId, emoji });
       const response = await messageService.toggleReaction(channelId, messageId, emoji);
-      console.log('📡 toggleReaction API response:', response);
       
       if (response.success) {
-        console.log('✅ toggleReaction API succeeded, processing response data:', response.data);
         
         // Handle different response formats
         let currentReactions = [];
@@ -883,12 +766,9 @@ export const useMessages = (channelId: string) => {
           // Alternative format: direct array
           currentReactions = response.data;
         } else {
-          console.warn('⚠️ Unexpected API response format, keeping optimistic reaction');
           // Keep the optimistic update, don't revert
           return;
         }
-        
-        console.log('📡 Processing currentReactions:', currentReactions);
         const updatedReactions = currentReactions.map((r: {
           emoji: string;
           count: number;
@@ -917,13 +797,7 @@ export const useMessages = (channelId: string) => {
         ));
       }
     } catch (err: any) {
-      console.error('🚨 addReaction: Failed to toggle reaction:', err);
-      console.error('🚨 addReaction: Error details:', {
-        name: err.name,
-        message: err.message,
-        stack: err.stack,
-        response: err.response
-      });
+      console.error('Failed to toggle reaction:', err.message || err);
       // Revert on error - ensure original message has reactions array
       const safeOriginalMessage = {
         ...originalMessage,
@@ -934,8 +808,7 @@ export const useMessages = (channelId: string) => {
       ));
     }
     } catch (error: any) {
-      console.error('🚨 addReaction: Outer catch - Critical error in addReaction:', error);
-      console.error('🚨 addReaction: Error stack:', error.stack);
+      console.error('Critical error in addReaction:', error.message || error);
       // Don't update UI state on critical errors
     }
   }, [currentUser, messages, channelId]);
@@ -984,9 +857,8 @@ export const useMessages = (channelId: string) => {
   useEffect(() => {
     // WebSocket should already be connected via auth slice, just ensure it's ready
     if (!webSocketService.isConnected()) {
-      console.log('⚠️ WebSocket not connected, attempting to connect...');
       webSocketService.connect().catch(error => {
-        console.error('❌ Failed to connect WebSocket in useMessages:', error);
+        console.error('Failed to connect WebSocket:', error.message || error);
         setError('Real-time features may be limited. Please refresh if issues persist.');
       });
     }
@@ -996,64 +868,55 @@ export const useMessages = (channelId: string) => {
 
     // Message events
     const handleMessageSent = (data: WebSocketMessageEvent) => {
-      console.log('📨 WebSocket message_sent event received:', data);
       
       // Handle both channelId and channel_id formats
       const eventChannelId = data.channelId || data.channel_id;
       
       if (eventChannelId === channelId) {
-        // Validate that message data exists and is not null/undefined
-        if (!data.message) {
-          console.warn('🚨 Received message_sent event with null/undefined message data:', data);
+        // Validate that message data exists - handle different data structures
+        let messageData = data.message || data.data;
+        if (!messageData) {
           return;
         }
         
         try {
-          console.log('📨 Raw WebSocket message data:', data.message);
           
           // New message in current channel (no transformation needed)
-          const newMessage = data.message as Message;
-          console.log('📥 Adding new message from WebSocket:', newMessage);
-          console.log('📥 WebSocket message reactions:', newMessage.reactions);
+          const newMessage = messageData as Message;
           // Use updateMessages instead of setMessages to ensure deduplication
           updateMessages(prev => {
             // Check if this message already exists (avoid duplicates from optimistic updates)
             const existingIndex = prev.findIndex(msg => msg.id === newMessage.id);
+            
             if (existingIndex >= 0) {
               // Replace existing message (could be optimistic)
-              console.log('🔄 Replacing existing message:', newMessage.id);
               return prev.map(msg => msg.id === newMessage.id ? newMessage : msg);
             } else {
               // Add new message
-              console.log('➕ Adding new message:', newMessage.id);
               return [...prev, newMessage];
             }
           });
         } catch (error) {
-          console.error('❌ Error processing message_sent event:', error);
-          console.log('📋 Message data that caused error:', data);
+          console.error('Error processing message_sent event:', error);
         }
-      } else {
-        console.log('📭 Message_sent event for different channel:', eventChannelId, 'current:', channelId);
       }
     };
 
     const handleMessageUpdated = (data: WebSocketMessageEvent & { messageId: string }) => {
       if (data.channelId === channelId) {
-        // Validate that message data exists and is not null/undefined
-        if (!data.message) {
-          console.warn('🚨 Received message_updated event with null/undefined message data:', data);
+        // Validate that message data exists - handle different data structures
+        let messageData = data.message || (data as any).data;
+        if (!messageData) {
           return;
         }
         
         try {
-          const updatedMessage = data.message as Message;
+          const updatedMessage = messageData as Message;
           setMessages(prev => prev.map(msg => 
             msg.id === data.messageId ? updatedMessage : msg
           ));
         } catch (error) {
-          console.error('❌ Error processing message_updated event:', error);
-          console.log('📋 Message data that caused error:', data);
+          console.error('Error processing message_updated event:', error);
         }
       }
     };
@@ -1066,7 +929,6 @@ export const useMessages = (channelId: string) => {
 
     // Reaction events
     const handleReactionToggled = (data: WebSocketReactionEvent) => {
-      console.log('🎭 WebSocket reaction_toggled event received:', data);
       const currentReactions = data.currentReactions || [];
       const updatedReactions = currentReactions.map((r) => ({
         emoji: r.emoji,
@@ -1138,7 +1000,6 @@ export const useMessages = (channelId: string) => {
     // Enhanced connection state handling
     const handleConnectionStateChange = () => {
       const connectionState = webSocketService.getConnectionState();
-      console.log('📶 WebSocket connection state changed:', connectionState);
 
       if (connectionState === 'connected') {
         setError(null); // Clear any connection errors
@@ -1163,7 +1024,6 @@ export const useMessages = (channelId: string) => {
         reactions: any[];
       }>;
     }) => {
-      console.log('🔄 Processing sync response:', data);
       
       try {
         if (data.messages && data.messages.length > 0) {
@@ -1171,7 +1031,6 @@ export const useMessages = (channelId: string) => {
             .filter(msg => {
               // Skip null/undefined messages
               if (!msg) {
-                console.warn('🚨 Received null/undefined message in sync response');
                 return false;
               }
               
@@ -1180,7 +1039,6 @@ export const useMessages = (channelId: string) => {
             }) as Message[]; // No transformation needed
           
           if (syncedMessages.length > 0) {
-            console.log('✅ Synced', syncedMessages.length, 'messages');
             updateMessages(prev => {
               const combined = [...syncedMessages, ...prev];
               return deduplicateMessages(combined);
@@ -1190,7 +1048,6 @@ export const useMessages = (channelId: string) => {
         
         // Handle synced reactions if needed
         if (data.reactions) {
-          console.log('🔄 Synced reactions:', data.reactions.length);
           // Update reactions in existing messages
           data.reactions.forEach(reactionUpdate => {
             if (reactionUpdate && reactionUpdate.message_id) {
@@ -1204,7 +1061,6 @@ export const useMessages = (channelId: string) => {
         }
       } catch (error) {
         console.error('❌ Error processing sync response:', error);
-        console.log('📋 Sync data that caused error:', data);
       }
     };
     

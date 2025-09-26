@@ -279,13 +279,11 @@ class WebSocketService {
   async connect(): Promise<void> {
     // Return existing connection if already connected
     if (this.socket?.connected && this.connectionState === 'connected') {
-      console.log('📡 WebSocket: Already connected');
       return;
     }
 
     // Return existing connection promise if already connecting
     if ((this.isConnecting || this.connectionState === 'connecting') && this.connectionPromise) {
-      console.log('📡 WebSocket: Connection already in progress, waiting...');
       return this.connectionPromise;
     }
 
@@ -325,13 +323,7 @@ class WebSocketService {
 
       const serverUrl = this.config.url;
       
-      console.log('🔌 WebSocket: Connecting with token in auth:', {
-        serverUrl,
-        hasToken: !!token,
-        tokenLength: token ? token.length : 0
-      });
       
-      console.log('🔌 WebSocket: Attempting connection to:', serverUrl);
       
       this.socket = io(serverUrl, {
         auth: { token },
@@ -355,7 +347,6 @@ class WebSocketService {
 
         this.socket!.on('connect', () => {
           clearTimeout(connectTimeout);
-          console.log('✅ WebSocket: Connected to server');
           this.reconnectAttempts = 0;
           this.connectionState = 'connected';
           
@@ -400,7 +391,6 @@ class WebSocketService {
     // Listen for token changes to automatically re-authenticate
     if (!this.tokenUnsubscribe) {
       this.tokenUnsubscribe = tokenManager.onTokenChange((newToken) => {
-        console.log('🔄 WebSocket: Token changed, reconnecting with new token...', !!newToken);
         if (newToken) {
           if (this.socket?.connected) {
             this.disconnect();
@@ -418,7 +408,6 @@ class WebSocketService {
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('🔌 WebSocket: Disconnected:', reason);
       this.connectionState = 'disconnected';
       this.stopHeartbeat();
       this.stopSyncInterval();
@@ -426,13 +415,10 @@ class WebSocketService {
       
       // Handle different disconnect reasons
       if (reason === 'io server disconnect') {
-        console.log('🔄 Server initiated disconnect, attempting immediate reconnection');
         this.handleReconnection();
       } else if (reason === 'ping timeout' || reason === 'transport close') {
-        console.log('🔄 Connection lost, attempting reconnection');
         this.handleReconnection();
       } else if (reason !== 'io client disconnect') {
-        console.log('🔄 Unexpected disconnect, attempting reconnection');
         this.handleReconnection();
       }
     });
@@ -449,26 +435,22 @@ class WebSocketService {
 
     // Comment events from task operations
     this.socket.on('comment_created', (event: CommentEvent) => {
-      console.log('💬 WebSocket: Comment created:', event);
       this.handleCommentEvent(event);
       this.emitToListeners('comment_created', event);
     });
 
     this.socket.on('comment_updated', (event: CommentEvent) => {
-      console.log('✏️ WebSocket: Comment updated:', event);
       this.handleCommentEvent(event);
       this.emitToListeners('comment_updated', event);
     });
 
     this.socket.on('comment_deleted', (event: CommentEvent) => {
-      console.log('🗑️ WebSocket: Comment deleted:', event);
       this.handleCommentEvent(event);
       this.emitToListeners('comment_deleted', event);
     });
 
     // Chat message events for task comments
     this.socket.on('chat_message', (event: ChatMessageEvent) => {
-      console.log('📩 WebSocket: Chat message (task comment):', event);
       this.handleChatMessageEvent(event);
       this.emitToListeners('chat_message', event);
     });
@@ -480,40 +462,33 @@ class WebSocketService {
     
     // Message events - unified from messageWebSocketService
     this.socket.on('message_sent', (data) => {
-      console.log('📨 WebSocket: Message sent:', data);
       this.emitToListeners('message_sent', data);
     });
 
     this.socket.on('message_updated', (data) => {
-      console.log('✏️ WebSocket: Message updated:', data);
       this.emitToListeners('message_updated', data);
     });
 
     this.socket.on('message_deleted', (data) => {
-      console.log('🗑️ WebSocket: Message deleted:', data);
       this.emitToListeners('message_deleted', data);
     });
 
 
     // Reaction events
     this.socket.on('reaction_toggled', (data) => {
-      console.log('😀 WebSocket: Reaction toggled:', data);
       this.emitToListeners('reaction_toggled', data);
     });
 
     this.socket.on('reactions_cleared', (data) => {
-      console.log('🧹 WebSocket: Reactions cleared:', data);
       this.emitToListeners('reactions_cleared', data);
     });
 
     // Channel events
     this.socket.on('user_joined_channel', (data) => {
-      console.log('👋 WebSocket: User joined channel:', data);
       this.emitToListeners('user_joined_channel', data);
     });
 
     this.socket.on('user_left_channel', (data) => {
-      console.log('👋 WebSocket: User left channel:', data);
       this.emitToListeners('user_left_channel', data);
     });
     
@@ -568,7 +543,6 @@ class WebSocketService {
     
     // Sync events
     this.socket.on('sync_response', (data) => {
-      console.log('🔄 WebSocket: Received sync response:', data);
       this.emitToListeners('sync_response', data);
     });
 
@@ -580,20 +554,15 @@ class WebSocketService {
 
   private rejoinRooms(): void {
     if (!this.socket?.connected) {
-      console.warn('⚠️ Cannot rejoin rooms: WebSocket not connected');
+      console.warn('Cannot rejoin rooms: WebSocket not connected');
       return;
     }
     
-    console.log('🔄 Rejoining rooms:', {
-      channels: Array.from(this.joinedChannels),
-      tasks: Array.from(this.joinedTasks)
-    });
     
     // Rejoin previously joined channels
     this.joinedChannels.forEach(channelId => {
       if (this.socket?.connected) {
         this.socket.emit('join_channel', { channelId });
-        console.log(`🏠 WebSocket: Rejoined channel: ${channelId}`);
       }
     });
 
@@ -601,7 +570,6 @@ class WebSocketService {
     this.joinedTasks.forEach(taskId => {
       if (this.socket?.connected) {
         this.socket.emit('join_task', { taskId });
-        console.log(`📋 WebSocket: Rejoined task: ${taskId}`);
       }
     });
   }
@@ -626,12 +594,10 @@ class WebSocketService {
     const jitter = Math.random() * 1000;
     const delay = Math.min(baseDelay + jitter, 30000);
     
-    console.log(`🔄 WebSocket: Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${Math.round(delay)}ms`);
     
     this.reconnectTimeoutId = setTimeout(async () => {
       try {
         await this.connect();
-        console.log('✅ WebSocket: Reconnection successful');
         
         // Process any queued operations after successful reconnection
         this.processOfflineQueue();
@@ -668,7 +634,6 @@ class WebSocketService {
         tasks: Array.from(this.joinedTasks),
       };
       
-      console.log('🔄 WebSocket: Requesting sync for missed updates:', syncData);
       this.socket.emit('request_sync', syncData);
     }
     
@@ -697,7 +662,6 @@ class WebSocketService {
       operation();
     } else {
       this.pendingOperations.push(operation);
-      console.log('📝 WebSocket: Queued operation for when connection is restored');
     }
   }
 
@@ -717,7 +681,6 @@ class WebSocketService {
       retryCount: 0,
     });
     
-    console.log(`📦 Added ${type} to offline queue (${this.offlineQueue.length}/${this.maxOfflineQueueSize})`);
   }
 
   /**
@@ -726,7 +689,6 @@ class WebSocketService {
   private processOfflineQueue(): void {
     if (this.offlineQueue.length === 0) return;
     
-    console.log(`🔄 Processing ${this.offlineQueue.length} queued operations`);
     
     const itemsToProcess = [...this.offlineQueue];
     this.offlineQueue = [];
@@ -757,7 +719,6 @@ class WebSocketService {
               }
               break;
           }
-          console.log(`✅ Processed offline ${item.type} operation`);
         } catch (error) {
           console.error(`❌ Failed to process offline ${item.type}:`, error);
           
@@ -770,7 +731,7 @@ class WebSocketService {
           }
         }
       } else {
-        console.warn(`🚨 Dropped offline ${item.type} after ${this.maxRetryCount} retries`);
+        console.warn(`Dropped offline ${item.type} after ${this.maxRetryCount} retries`);
       }
     });
   }
@@ -786,7 +747,6 @@ class WebSocketService {
    * Handle task updates from server
    */
   private handleTaskUpdate(event: TaskUpdateEvent): void {
-    console.log('Task update received:', event);
     
     switch (event.type) {
       case 'task_created':
@@ -811,7 +771,6 @@ class WebSocketService {
    * Handle notifications from server
    */
   private handleNotification(notification: NotificationEvent): void {
-    console.log('Notification received:', notification);
     
     // Emit to custom listeners
     this.emitToListeners('notification', notification);
@@ -827,7 +786,6 @@ class WebSocketService {
    */
   private async showLocalNotification(notification: NotificationEvent): Promise<void> {
     // Simple implementation to avoid parsing issues
-    console.log('Local notification:', notification);
     
     // TODO: Implement platform-specific notifications
     // For now, just log the notification
@@ -910,13 +868,11 @@ class WebSocketService {
     
     // Add to joined channels set for reconnection tracking
     this.joinedChannels.add(channelId);
-    console.log('📥 Added channel to joined set:', channelId);
     
     if (this.socket?.connected) {
       this.socket.emit('join_channel', { channelId });
-      console.log('🏠 Joined channel room:', channelId);
     } else {
-      console.warn('⚠️ Cannot join channel: WebSocket not connected, will rejoin on reconnect');
+      console.warn('Cannot join channel: WebSocket not connected, will rejoin on reconnect');
     }
   }
 
@@ -930,13 +886,11 @@ class WebSocketService {
     
     // Remove from joined channels set
     this.joinedChannels.delete(channelId);
-    console.log('📤 Removed channel from joined set:', channelId);
     
     if (this.socket?.connected) {
       this.socket.emit('leave_channel', { channelId });
-      console.log('🚪 Left channel room:', channelId);
     } else {
-      console.warn('⚠️ Cannot leave channel: WebSocket not connected');
+      console.warn('Cannot leave channel: WebSocket not connected');
     }
   }
 
@@ -1155,7 +1109,6 @@ class WebSocketService {
       return Promise.reject(new Error('WebSocket service has been destroyed'));
     }
     
-    console.log('🔄 WebSocket: Force reconnecting...');
     this.disconnect();
     this.reconnectAttempts = 0;
     return this.connect();
@@ -1172,7 +1125,6 @@ class WebSocketService {
    * Disconnect WebSocket
    */
   disconnect(): void {
-    console.log('🔌 WebSocket: Disconnecting...');
     
     this.stopHeartbeat();
     this.stopSyncInterval();
@@ -1224,19 +1176,13 @@ class WebSocketService {
         
         // More lenient timeout check: ping interval + timeout + buffer
         if (timeSinceLastHeartbeat > 60000 + this.heartbeatTimeoutMs) {
-          console.warn('⚠️ WebSocket: Heartbeat timeout detected, attempting reconnection');
-          console.log('📊 Heartbeat debug:', {
-            timeSinceLastHeartbeat,
-            heartbeatTimeoutMs: this.heartbeatTimeoutMs,
-            threshold: 60000 + this.heartbeatTimeoutMs
-          });
+          console.warn('WebSocket: Heartbeat timeout detected, attempting reconnection');
           this.handleReconnection();
           return;
         }
         
         // Send ping to keep connection alive
         this.socket.emit('ping');
-        console.log('💓 Sent heartbeat ping');
       }
     }, 60000); // Check every 60 seconds (less frequent)
   }
@@ -1334,7 +1280,6 @@ class WebSocketService {
 
     // Additional processing can be added here
     // For now, we just emit the event for listeners
-    console.log(`🔄 WebSocket: Processing comment event [${event.type}]:`, event);
     
     // The event has already been emitted in setupEventHandlers
     // This method is for additional processing if needed
@@ -1350,7 +1295,6 @@ class WebSocketService {
     }
 
     // Additional processing for task comment messages
-    console.log(`🔄 WebSocket: Processing chat message event [${event.type}]:`, event);
     
     // The event has already been emitted in setupEventHandlers  
     // This method is for additional processing if needed
