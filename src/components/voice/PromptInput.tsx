@@ -37,6 +37,7 @@ import { useToast } from '../../contexts/ToastContext';
 
 interface PromptInputProps {
   onSendMessage?: (text: string) => void;
+  onSendVoiceMessage?: (audioUri: string, transcript?: string) => void;
   onEditMessage?: (messageId: string, content: string) => void;
   onAttachFile?: (file: any) => void;
   onAttachImage?: (image: any) => void;
@@ -73,6 +74,7 @@ interface MentionUser {
 
 export const PromptInput: React.FC<PromptInputProps> = ({
   onSendMessage,
+  onSendVoiceMessage,
   onEditMessage,
   onAttachFile,
   onAttachImage,

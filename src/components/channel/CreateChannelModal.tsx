@@ -1,8 +1,10 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, TextInput, Modal, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, TextInput, Modal, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import IonIcon from 'react-native-vector-icons/Ionicons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
+import { VoiceService, ChannelFormData } from '../../services/api/voiceService';
+import { PromptInput } from '../voice/PromptInput';
 
 interface Member {
   id: string;
@@ -71,10 +73,68 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   onToggleMember,
   onShowMemberSelector,
 }) => {
+  const [showVoiceInput, setShowVoiceInput] = useState(false);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+
   const handleFieldChange = (field: keyof FormData, value: any) => {
     onFormDataChange({ [field]: value });
     if (formErrors[field as keyof FormErrors]) {
       onFormErrorsChange({ [field as keyof FormErrors]: '' });
+    }
+  };
+
+  const handleVoiceCommand = async (transcript: string) => {
+    try {
+      setIsProcessingVoice(true);
+      console.log('Processing voice command for channel:', transcript);
+      
+      const result = await VoiceService.processVoiceCommand(transcript);
+      
+      if (result.success && result.intent.type === 'create_channel') {
+        const voiceData = result.formData as Partial<ChannelFormData>;
+        
+        // Populate form with voice data
+        if (voiceData.name) {
+          handleFieldChange('name', voiceData.name);
+        }
+        if (voiceData.description) {
+          handleFieldChange('description', voiceData.description);
+        }
+        if (voiceData.type) {
+          handleFieldChange('type', voiceData.type);
+        }
+        if (voiceData.privacy) {
+          handleFieldChange('privacy', voiceData.privacy);
+        }
+        if (voiceData.tags && voiceData.tags.length > 0) {
+          voiceData.tags.forEach(tag => {
+            if (!formData.tags.includes(tag)) {
+              onAddTag(); // This might need to be updated to accept the tag directly
+            }
+          });
+        }
+        
+        // Show suggestions to user
+        if (result.suggestions && result.suggestions.length > 0) {
+          Alert.alert(
+            'Voice Input Processed',
+            `Form populated successfully!\n\nSuggestions:\n${result.suggestions.join('\n')}`,
+            [{ text: 'OK' }]
+          );
+        }
+        
+        setShowVoiceInput(false);
+      } else {
+        Alert.alert(
+          'Voice Command Not Recognized', 
+          'Please try saying something like "Create channel for marketing team with John and Sarah"'
+        );
+      }
+    } catch (error) {
+      console.error('Voice processing error:', error);
+      Alert.alert('Voice Error', 'Failed to process voice command. Please try again.');
+    } finally {
+      setIsProcessingVoice(false);
     }
   };
 
@@ -91,9 +151,24 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
             <Text className="text-2xl font-bold text-gray-900">
               {isEditMode ? 'Edit Channel' : 'Create Channel'}
             </Text>
-            <TouchableOpacity onPress={onClose}>
-              <MaterialIcon name="close" size={24} color="#6B7280" />
-            </TouchableOpacity>
+            <View className="flex-row items-center space-x-3">
+              {!isEditMode && (
+                <TouchableOpacity 
+                  onPress={() => setShowVoiceInput(true)}
+                  className="bg-purple-100 rounded-full p-2"
+                  disabled={isProcessingVoice}
+                >
+                  {isProcessingVoice ? (
+                    <ActivityIndicator size="small" color="#8B5CF6" />
+                  ) : (
+                    <MaterialIcon name="mic" size={20} color="#8B5CF6" />
+                  )}
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose}>
+                <MaterialIcon name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -485,6 +560,46 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
           </View>
         </View>
       </View>
+      
+      {/* Voice Input Modal */}
+      {showVoiceInput && (
+        <Modal
+          visible={showVoiceInput}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowVoiceInput(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center' }}>
+            <View className="mx-4 bg-white rounded-3xl p-6">
+              <View className="mb-4">
+                <Text className="text-xl font-bold text-gray-900 text-center mb-2">
+                  🎤 Voice Channel Creation
+                </Text>
+                <Text className="text-gray-600 text-center">
+                  Say something like: "Create marketing channel with John and Sarah"
+                </Text>
+              </View>
+              
+              <PromptInput
+                placeholder="Voice command will appear here..."
+                onSendMessage={handleVoiceCommand}
+                onClose={() => setShowVoiceInput(false)}
+                showCloseButton={true}
+                autoFocus={true}
+                disabled={isProcessingVoice}
+                isLoading={isProcessingVoice}
+              />
+              
+              {isProcessingVoice && (
+                <View className="mt-4 flex-row items-center justify-center">
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text className="text-purple-600 ml-2">Processing voice command...</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
     </Modal>
   );
 };

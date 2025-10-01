@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
@@ -10,6 +10,9 @@ interface TaskCreateHeaderProps {
   onBack: () => void;
   currentStep: number;
   totalSteps: number;
+  onVoiceInput?: () => void;
+  isProcessingVoice?: boolean;
+  showVoiceButton?: boolean;
 }
 
 export const TaskCreateHeader: React.FC<TaskCreateHeaderProps> = ({
@@ -18,6 +21,9 @@ export const TaskCreateHeader: React.FC<TaskCreateHeaderProps> = ({
   onBack,
   currentStep,
   totalSteps,
+  onVoiceInput,
+  isProcessingVoice = false,
+  showVoiceButton = false,
 }) => {
   const insets = useSafeAreaInsets();
 
@@ -41,10 +47,26 @@ export const TaskCreateHeader: React.FC<TaskCreateHeaderProps> = ({
             <Text className="text-sm text-gray-500 mt-1">{subtitle}</Text>
           </View>
 
-          <View className="w-10 h-10 bg-blue-50 rounded-full items-center justify-center">
-            <Text className="text-blue-600 font-bold text-sm">
-              {currentStep}/{totalSteps}
-            </Text>
+          <View className="flex-row items-center space-x-3">
+            {showVoiceButton && onVoiceInput && (
+              <TouchableOpacity
+                onPress={onVoiceInput}
+                className="w-10 h-10 bg-purple-100 rounded-full items-center justify-center"
+                disabled={isProcessingVoice}
+              >
+                {isProcessingVoice ? (
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                ) : (
+                  <MaterialIcon name="mic" size={18} color="#8B5CF6" />
+                )}
+              </TouchableOpacity>
+            )}
+            
+            <View className="w-10 h-10 bg-blue-50 rounded-full items-center justify-center">
+              <Text className="text-blue-600 font-bold text-sm">
+                {currentStep}/{totalSteps}
+              </Text>
+            </View>
           </View>
         </View>
 

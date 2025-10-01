@@ -7,6 +7,8 @@ import {
   KeyboardAvoidingView,
   StatusBar,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
@@ -33,6 +35,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../contexts/ToastContext';
 import { CreateTaskData } from '../../types/task.types';
 import { useTranslation } from 'react-i18next';
+import { VoiceService, TaskFormData } from '../../services/api/voiceService';
+import { PromptInput } from '../../components/voice/PromptInput';
 
 type TaskCreateScreenProps = NativeStackScreenProps<
   MainStackParamList,
@@ -143,6 +147,8 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [availableAssignees, setAvailableAssignees] = useState<TaskAssignee[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [showVoiceInput, setShowVoiceInput] = useState(false);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
 
   // Load initial data
   useEffect(() => {
@@ -783,6 +789,90 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
     }
   };
 
+  const handleVoiceCommand = async (transcript: string) => {
+    try {
+      setIsProcessingVoice(true);
+      console.log('Processing voice command for task:', transcript);
+      
+      const result = await VoiceService.processVoiceCommand(transcript);
+      
+      if (result.success && result.intent.type === 'create_task') {
+        const voiceData = result.formData as Partial<TaskFormData>;
+        
+        // Populate form with voice data
+        if (voiceData.title) {
+          updateFormData('title', voiceData.title);
+        }
+        if (voiceData.description) {
+          updateFormData('description', voiceData.description);
+        }
+        if (voiceData.priority) {
+          updateFormData('priority', voiceData.priority);
+        }
+        if (voiceData.dueDate) {
+          updateFormData('endDate', voiceData.dueDate);
+        }
+        if (voiceData.tags && voiceData.tags.length > 0) {
+          voiceData.tags.forEach(tag => {
+            if (!formData.tags.includes(tag)) {
+              updateFormData('tags', [...formData.tags, tag]);
+            }
+          });
+        }
+        
+        // Handle assignees with name matching
+        if (voiceData.assignees && voiceData.assignees.length > 0) {
+          const matchedAssignees: TaskAssignee[] = [];
+          voiceData.assignees.forEach(assigneeName => {
+            // Try to match with available assignees
+            const matched = availableAssignees.find(assignee => 
+              assignee.name.toLowerCase().includes(assigneeName.toLowerCase()) ||
+              assigneeName.toLowerCase().includes(assignee.name.toLowerCase())
+            );
+            if (matched && !matchedAssignees.find(m => m.id === matched.id)) {
+              matchedAssignees.push(matched);
+            }
+          });
+          
+          if (matchedAssignees.length > 0) {
+            updateFormData('assignees', [...formData.assignees, ...matchedAssignees]);
+          }
+        }
+        
+        // Show suggestions to user
+        if (result.suggestions && result.suggestions.length > 0) {
+          Alert.alert(
+            'Voice Input Processed',
+            `Task form populated successfully!\n\nSuggestions:\n${result.suggestions.join('\n')}`,
+            [{ text: 'OK' }]
+          );
+        }
+        
+        setShowVoiceInput(false);
+        
+        // Navigate to appropriate page based on what was filled
+        if (voiceData.title && voiceData.description && currentPage === 1) {
+          // Move to next page if basic info is complete
+          setTimeout(() => {
+            if (validateCurrentPage()) {
+              setCurrentPage(2);
+            }
+          }, 500);
+        }
+      } else {
+        Alert.alert(
+          'Voice Command Not Recognized', 
+          'Please try saying something like "Create task review budget assign to John due Friday high priority"'
+        );
+      }
+    } catch (error) {
+      console.error('Voice processing error:', error);
+      Alert.alert('Voice Error', 'Failed to process voice command. Please try again.');
+    } finally {
+      setIsProcessingVoice(false);
+    }
+  };
+
   const renderPage = () => {
     switch (currentPage) {
       case 1:
@@ -910,6 +1000,9 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         }}
         currentStep={currentPage}
         totalSteps={pageHeaders.length}
+        onVoiceInput={() => setShowVoiceInput(true)}
+        isProcessingVoice={isProcessingVoice}
+        showVoiceButton={!isEditMode}
       />
 
       {/* General Error Display */}
@@ -986,6 +1079,46 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
             }
           }}
         />
+      )}
+
+      {/* Voice Input Modal */}
+      {showVoiceInput && (
+        <Modal
+          visible={showVoiceInput}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowVoiceInput(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center' }}>
+            <View className="mx-4 bg-white rounded-3xl p-6">
+              <View className="mb-4">
+                <Text className="text-xl font-bold text-gray-900 text-center mb-2">
+                  🎤 Voice Task Creation
+                </Text>
+                <Text className="text-gray-600 text-center">
+                  Say something like: "Create task review budget assign to John due Friday high priority"
+                </Text>
+              </View>
+              
+              <PromptInput
+                placeholder="Voice command will appear here..."
+                onSendMessage={handleVoiceCommand}
+                onClose={() => setShowVoiceInput(false)}
+                showCloseButton={true}
+                autoFocus={true}
+                disabled={isProcessingVoice}
+                isLoading={isProcessingVoice}
+              />
+              
+              {isProcessingVoice && (
+                <View className="mt-4 flex-row items-center justify-center">
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text className="text-purple-600 ml-2">Processing voice command...</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
       )}
     </View>
   );

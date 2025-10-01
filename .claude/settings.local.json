@@ -25,7 +25,9 @@
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
       "Bash(git commit:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(curl:*)",
+      "Read(//Users/mac/Documents/**)"
     ],
     "deny": [],
     "ask": []
