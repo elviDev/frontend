@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -69,28 +69,33 @@ const mapApiChannelToDisplayChannel = (apiChannel: ApiChannel, stats?: {
   messageCount: number;
   fileCount: number;
   members: Member[];
-}): Channel => ({
-  id: apiChannel.id,
-  title: apiChannel.name,
-  description: apiChannel.description || '',
-  category: apiChannel.channel_type || 'general',
-  tags: [], // Tags would need to be implemented in the API
-  members: stats?.members || [], // Members from API
-  memberAvatars: stats?.members?.map(m => m.avatar || m.name?.charAt(0) || '?') || [], // URLs if available, otherwise initials
-  messages: stats?.messageCount || 0, // Actual message count from API
-  files: stats?.fileCount || 0, // Actual file count from API
-  memberCount: apiChannel.member_count || stats?.members?.length || 0,
-  privacy: apiChannel.privacy_level || 'public',
-  createdAt: new Date(apiChannel.created_at),
-});
+}): Channel => {
+return  ({
+    id: apiChannel.id,
+    title: apiChannel.name,
+    description: apiChannel.description || '',
+    category: apiChannel.channel_type || 'general',
+    tags: apiChannel.project_info.tags, // Tags would need to be implemented in the API
+    members: stats?.members || [], // Members from API
+    memberAvatars:
+      stats?.members?.map(m => m.avatar || m.name?.charAt(0) || '?') || [], // URLs if available, otherwise initials
+    messages: stats?.messageCount || 0, // Actual message count from API
+    files: stats?.fileCount || 0, // Actual file count from API
+    memberCount: apiChannel.member_count || stats?.members?.length || 0,
+    privacy: apiChannel.privacy_level || 'public',
+    createdAt: new Date(apiChannel.created_at),
+  });
+}
 
 export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   navigation,
 }) => {
-  const { t, navigation: nav, common, channels: channelTr } = useAppTranslation();
+  const { common, channels: channelTr } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -101,6 +106,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   const [categories, setCategories] = useState<Category[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [submittingChannel, setSubmittingChannel] = useState(false);
+  const [deletingChannel, setDeletingChannel] = useState(false);
 
   // Channel creation/editing form state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -163,8 +170,6 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       const otherMembers = members.filter(m => m.id !== currentUser.id);
       
       if (currentUserMember) {
-        currentUserMember.name = 'You';
-        currentUserMember.role = 'Current User';
         setAvailableMembers([currentUserMember, ...otherMembers]);
       } else {
         // Current user not found in members list - set empty state
@@ -174,22 +179,23 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       console.error('Failed to load available members:', error);
       // Set empty state when unable to load members
       setAvailableMembers([]);
+      // Use functional update to avoid dependency
       showError('Unable to load team members. Please try again later.');
     } finally {
       setLoadingMembers(false);
     }
-  }, [showWarning]);
+  }, []); // Remove showWarning dependency
 
   // Categories
   // Load categories from API
-  const loadCategories = useCallback(async () => {
+  const loadCategories = useCallback(async (channelList?: Channel[]) => {
     try {
       const apiCategories = await channelService.getChannelCategories();
       
       // Calculate channel counts for each category
       const categoriesWithCounts: Category[] = apiCategories.map(category => ({
         ...category,
-        count: channels.filter(channel => {
+        count: (channelList || []).filter(channel => {
           const channelMappedCategory = CHANNEL_TYPE_TO_CATEGORY_MAP[channel.category];
           return channelMappedCategory === category.id;
         }).length,
@@ -201,10 +207,15 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       // Set empty state when unable to load categories
       setCategories([]);
     }
-  }, [channels]);
+  }, []); // No dependencies - channelList is always passed as parameter
 
   // Load channels function
   const loadChannels = useCallback(async (showLoadingSpinner: boolean = true) => {
+    // Prevent multiple concurrent requests
+    if (loading && showLoadingSpinner) {
+      return;
+    }
+    
     try {
       if (showLoadingSpinner) {
         setLoading(true);
@@ -214,29 +225,56 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       try {
         const apiChannelsWithStats = await channelService.getChannelsWithStats();
         
-        // Use member_details from API response directly
+        // Use member_details from API response directly with error boundary protection
         const displayChannels: Channel[] = apiChannelsWithStats.map((apiChannel) => {
-          // Use member_details from the API response
-          const members: Member[] = apiChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
-            id: memberDetail.id,
-            name: memberDetail.name || 'Unknown User',
-            avatar: memberDetail.avatar_url || memberDetail.name?.charAt(0)?.toUpperCase() || '?',
-            role: memberDetail.role,
-            email: memberDetail.email,
-          })) || [];
+          try {
+            // Use member_details from the API response with proper null checks
+            const members: Member[] = apiChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
+              id: memberDetail?.id || 'unknown',
+              name: memberDetail?.name || 'Unknown User',
+              avatar: memberDetail?.avatar_url || memberDetail?.name?.charAt(0)?.toUpperCase() || '?',
+              role: memberDetail?.role || 'Member',
+              email: memberDetail?.email,
+              department: memberDetail?.department,
+              job_title: memberDetail?.job_title,
+            })).filter(member => member.id !== 'unknown') || [];
 
-          return mapApiChannelToDisplayChannel(apiChannel, {
-            messageCount: apiChannel.messageCount,
-            fileCount: apiChannel.fileCount,
-            members,
-          });
-        });
+            return mapApiChannelToDisplayChannel(apiChannel, {
+              messageCount: apiChannel.messageCount || 0,
+              fileCount: apiChannel.fileCount || 0,
+              members,
+            });
+          } catch (channelMappingError) {
+            console.warn('Failed to map channel data:', {
+              channelId: apiChannel?.id,
+              error: channelMappingError
+            });
+            // Return a safe default channel object for malformed data
+            return {
+              id: apiChannel?.id || 'error-channel',
+              title: apiChannel?.name || 'Unknown Channel',
+              description: 'Error loading channel data',
+              category: 'general',
+              tags: [],
+              members: [],
+              memberAvatars: [],
+              messages: 0,
+              files: 0,
+              memberCount: 0,
+              privacy: 'public' as const,
+              createdAt: new Date(),
+            };
+          }
+        }).filter(channel => channel.id !== 'error-channel');
         
         setChannels(displayChannels);
+        // Update categories with the new channel list immediately
+        await loadCategories(displayChannels);
       } catch (apiError) {
         console.warn('Failed to fetch from API:', apiError);
         // Set empty state when unable to load channels
         setChannels([]);
+        await loadCategories([]);
       }
       
     } catch (error) {
@@ -246,14 +284,10 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [showError]);
+  }, []); // No dependencies to prevent re-renders - functions are stable
 
-  // Load categories after channels are loaded
-  useEffect(() => {
-    if (channels.length > 0) {
-      loadCategories();
-    }
-  }, [channels, loadCategories]);
+  // Load categories after channels are loaded - removed this useEffect to prevent circular dependency
+  // Categories are now loaded directly in loadChannels function
 
   // Load available members on component mount
   useEffect(() => {
@@ -262,23 +296,45 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
 
   // Initialize form with current user as member when available
   useEffect(() => {
-    if (showCreateChannel && formData.members.length === 0 && availableMembers.length > 0) {
-      const currentUser = availableMembers.find(member => member.name === 'You');
-      if (currentUser) {
+    if (showCreateChannel && formData.members.length === 0 && availableMembers.length > 0 && user?.id) {
+      const currentUserMember = availableMembers.find(member => member.id === user.id);
+      if (currentUserMember) {
         setFormData(prev => ({
           ...prev,
-          members: [currentUser]
+          members: [currentUserMember]
         }));
       }
     }
-  }, [showCreateChannel, availableMembers, formData.members.length]);
+  }, [showCreateChannel, availableMembers, formData.members.length, user?.id]);
 
   // Load channels on component mount
   useEffect(() => {
     loadChannels();
   }, [loadChannels]);
 
-  // Filter channels based on search query and selected categories
+  // Debounce search query
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Handle search input change with debouncing
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
+
+  // Filter channels based on debounced search query and selected categories
   const filteredChannels = useMemo(() => {
     let filtered = channels;
 
@@ -290,9 +346,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       });
     }
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
+    // Filter by debounced search query
+    if (debouncedSearchQuery.trim()) {
+      const query = debouncedSearchQuery.toLowerCase().trim();
       filtered = filtered.filter(
         channel =>
           channel.title.toLowerCase().includes(query) ||
@@ -303,7 +359,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     }
 
     return filtered;
-  }, [channels, searchQuery, selectedCategories]);
+  }, [channels, debouncedSearchQuery, selectedCategories]);
 
   // Form validation
   const validateForm = () => {
@@ -349,20 +405,23 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     setTagInput('');
     setIsEditMode(false);
     setEditingChannelId(null);
+    setSubmittingChannel(false);
   };
 
   // Handle form submission (create or edit)
   const handleSubmitChannel = async () => {
-    if (!validateForm()) {
+    if (!validateForm() || submittingChannel) {
       return;
     }
+
+    setSubmittingChannel(true);
 
     try {
       const channelData = {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
-        type: formData.type as any, // Maps to channel_type in backend
-        privacy: formData.privacy as any, // Maps to privacy_level in backend
+        type: formData.type as ApiChannel['channel_type'], // Maps to channel_type in backend
+        privacy: formData.privacy as ApiChannel['privacy_level'], // Maps to privacy_level in backend
         ...(formData.parent_id && { parent_id: formData.parent_id }),
         tags: formData.tags,
         ...(formData.color && { color: formData.color }),
@@ -382,8 +441,14 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       // Refresh channels list
       await loadChannels(false);
       
-      resetForm();
+      // Close modal first, then reset form to prevent UI flicker
       setShowCreateChannel(false);
+      
+      // Reset form after a small delay to ensure modal transition completes
+      setTimeout(() => {
+        resetForm();
+      }, 100);
+      
     } catch (error) {
       console.error(`Failed to ${isEditMode ? 'update' : 'create'} channel:`, {
         error: error instanceof Error ? error.message : error,
@@ -404,6 +469,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       } else {
         showError(`Failed to ${isEditMode ? 'update' : 'create'} channel. Please try again.`);
       }
+    } finally {
+      setSubmittingChannel(false);
     }
   };
 
@@ -448,20 +515,12 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   // Toggle member selection
   const toggleMember = useCallback((member: Member) => {
     // Use functional updates to avoid dependencies
-    setAvailableMembers(currentMembers => {
-      // Don't allow removing current user if they exist
-      const currentUser = currentMembers.find(m => m.name === 'You');
-      if (currentUser && member.id === currentUser.id) return currentMembers;
-      
-      setFormData(prev => ({
-        ...prev,
-        members: prev.members.some(m => m.id === member.id)
-          ? prev.members.filter(m => m.id !== member.id)
-          : [...prev.members, member]
-      }));
-      
-      return currentMembers; // No change to availableMembers
-    });
+    setFormData(prev => ({
+      ...prev,
+      members: prev.members.some(m => m.id === member.id)
+        ? prev.members.filter(m => m.id !== member.id)
+        : [...prev.members, member]
+    }));
   }, []);
 
   const handleChannelPress = (channel: Channel) => {
@@ -498,13 +557,19 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   };
 
   const handleChannelOptions = (channel: DisplayChannel) => {
+    console.log('handleChannelOptions called', { 
+      channelId: channel.id, 
+      currentShowState: showActionSheet,
+      currentSelectedChannel: selectedChannelForAction?.id 
+    });
+    
     // Ensure all other modals are closed
     setShowCategoryFilter(false);
     setShowCreateChannel(false);
     setShowMemberSelector(false);
     setShowDeleteConfirmation(false);
     
-    // Open ActionSheet
+    // Simple direct state setting
     setSelectedChannelForAction(channel);
     setShowActionSheet(true);
   };
@@ -515,7 +580,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   };
 
   const confirmDeleteChannel = async () => {
-    if (!selectedChannelForAction) return;
+    if (!selectedChannelForAction || deletingChannel) return;
+    
+    setDeletingChannel(true);
     
     try {
       await channelService.deleteChannel(selectedChannelForAction.id);
@@ -531,6 +598,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         showError('Failed to delete channel. Please try again.');
       }
     } finally {
+      setDeletingChannel(false);
       setShowDeleteConfirmation(false);
       setSelectedChannelForAction(null);
     }
@@ -540,8 +608,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     startEditChannel(channel);
   };
 
-  // Helper function to get action sheet options based on user role and channel
-  const getActionSheetOptions = () => {
+  // Memoized action sheet options to prevent recreation on every render
+  const actionSheetOptions = useMemo(() => {
     if (!selectedChannelForAction) return [];
     
     // Check if user can edit (CEO, channel owner, or channel admin)
@@ -562,16 +630,18 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       onPress: () => void;
     }> = [];
     
+    // Store the channel reference for closures
+    const channelRef = selectedChannelForAction;
+    
     // Add edit option if user has permission
     if (canEdit) {
       options.push({
-        text: 'Edit Channel',
+        text: channelTr.editChannel(),
         icon: 'edit',
         iconLibrary: 'material',
         style: 'default',
         onPress: () => {
-          setShowActionSheet(false);
-          handleEditChannel(selectedChannelForAction);
+          handleEditChannel(channelRef);
         },
       });
     }
@@ -579,40 +649,44 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     // Add delete option if user has permission
     if (canDelete) {
       options.push({
-        text: 'Delete Channel',
+        text: channelTr.deleteChannel(),
         icon: 'delete',
         iconLibrary: 'material',
         style: 'destructive',
         onPress: () => {
-          setShowActionSheet(false);
-          handleDeleteChannel(selectedChannelForAction);
+          handleDeleteChannel(channelRef);
         },
       });
     }
     
     // Always add view channel option
     options.push({
-      text: 'View Channel',
+      text: channelTr.viewChannel(),
       icon: 'visibility',
       iconLibrary: 'material',
       style: 'default',
       onPress: () => {
-        setShowActionSheet(false);
-        handleChannelPress(selectedChannelForAction);
+        handleChannelPress(channelRef);
       },
     });
     
     options.push({
-      text: 'Cancel',
+      text: common.cancel(),
       icon: 'close',
       iconLibrary: 'material',
       style: 'cancel',
-      onPress: () => {},
+      onPress: () => {
+        // Cancel doesn't need the channel reference
+      },
     });
     
     return options;
-  };
+  }, [selectedChannelForAction, user?.role, user?.id, channelTr, common]);
 
+
+
+    console.log("Visible Actions",showActionSheet, selectedChannelForAction?.id, actionSheetOptions);
+  // Removed console.log to improve performance
   return (
     <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
       {/* Header */}
@@ -663,7 +737,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
             <TextInput
               placeholder={channelTr.searchChannels()}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearchChange}
               onFocus={() => setIsSearchFocused(true)}
               onBlur={() => setIsSearchFocused(false)}
               style={{
@@ -679,7 +753,10 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity
-                onPress={() => setSearchQuery('')}
+                onPress={() => {
+                  setSearchQuery('');
+                  setDebouncedSearchQuery('');
+                }}
                 className="p-1"
               >
                 <Feather name="x" size={18} color="#9CA3AF" />
@@ -727,7 +804,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
             <Text className="text-gray-600 text-sm">
               {filteredChannels.length > 0
                 ? `${filteredChannels.length} ${channelTr.channelsFound(filteredChannels.length)}`
-                : t('channels.noChannelsFound')}
+                : 'No channels found'}
             </Text>
           </Animated.View>
         )}
@@ -868,6 +945,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         formErrors={formErrors}
         availableMembers={availableMembers}
         tagInput={tagInput}
+        submitting={submittingChannel}
         onFormDataChange={(data) => setFormData(prev => ({ ...prev, ...data }))}
         onFormErrorsChange={(errors) => setFormErrors(prev => ({ ...prev, ...errors }))}
         onTagInputChange={setTagInput}
@@ -889,33 +967,39 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       />
 
       {/* Action Sheet for Channel Options */}
-      <ActionSheet
-        visible={showActionSheet}
-        title="Channel Options"
-        message={selectedChannelForAction ? `Options for "${selectedChannelForAction.title}"` : ''}
-        options={getActionSheetOptions()}
-        onClose={() => {
-          setShowActionSheet(false);
-          setSelectedChannelForAction(null);
-        }}
-      />
+      {showActionSheet && (
+        <ActionSheet
+          key={selectedChannelForAction?.id || 'action-sheet'} // Force re-render with key
+          visible={showActionSheet}
+          title={channelTr.channelOptions()}
+          message={selectedChannelForAction ? `Options for "${selectedChannelForAction.title}"` : ''}
+          options={actionSheetOptions}
+          onClose={() => {
+            console.log('ActionSheet onClose called');
+            setShowActionSheet(false);
+            setSelectedChannelForAction(null);
+          }}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       <ConfirmationModal
         visible={showDeleteConfirmation}
-        title="Delete Channel"
+        title={channelTr.deleteChannel()}
         message={
           selectedChannelForAction
             ? `Are you sure you want to delete "${selectedChannelForAction.title}"? This action cannot be undone and will remove all messages and files in this channel.`
             : ''
         }
-        confirmText="Delete"
-        cancelText="Cancel"
+        confirmText={deletingChannel ? 'Deleting...' : common.delete()}
+        cancelText={common.cancel()}
         confirmStyle="destructive"
         onConfirm={confirmDeleteChannel}
         onCancel={() => {
-          setShowDeleteConfirmation(false);
-          setSelectedChannelForAction(null);
+          if (!deletingChannel) {
+            setShowDeleteConfirmation(false);
+            setSelectedChannelForAction(null);
+          }
         }}
       />
     </View>

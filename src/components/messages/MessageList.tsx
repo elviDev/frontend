@@ -112,14 +112,14 @@ export const MessageList: React.FC<MessageListProps> = ({
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    if (flatListRef.current && messages.length > 0) {
+    if (flatListRef.current && messageThreads.mainMessages.length > 0) {
       flatListRef.current.scrollToIndex({
-        index: messages.length - 1,
+        index: messageThreads.mainMessages.length - 1,
         animated: true,
       });
       onScrollToBottom?.();
     }
-  }, [messages.length, onScrollToBottom]);
+  }, [ onScrollToBottom]);
 
   const renderDateSeparator = useCallback(
     (date: Date) => (
@@ -134,12 +134,45 @@ export const MessageList: React.FC<MessageListProps> = ({
     [formatDateSeparator],
   );
 
+  // Create a map of parent messages with their replies
+  const messageThreads = useMemo(() => {
+    const threads: { [key: string]: MessageType[] } = {};
+    const mainMessages: MessageType[] = [];
+    
+    // First pass: identify main messages and create thread map
+    messages.forEach(message => {
+      if (message.reply_to_id) {
+       
+        if (!threads[message.reply_to_id]) {
+          threads[message.reply_to_id] = [];
+        }
+        threads[message.reply_to_id].push(message);
+      } else {
+        // This is a main message
+        mainMessages.push(message);
+        if (!threads[message.id]) {
+          threads[message.id] = [];
+        }
+      }
+    });
+    
+    // Sort replies by creation date
+    Object.keys(threads).forEach(threadId => {
+      threads[threadId].sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
+    
+    return { threads, mainMessages };
+  }, [messages]);
+
   const renderMessage = useCallback(
     ({ item, index }: { item: MessageType; index: number }) => {
       const previousMessage =
-        index < messages.length - 1 ? messages[index + 1] : undefined;
+        index < messageThreads.mainMessages.length - 1 ? messageThreads.mainMessages[index + 1] : undefined;
       const isGrouped = shouldGroupMessage(item, previousMessage);
       const showDateSeparator = shouldShowDateSeparator(item, previousMessage);
+      const replies = messageThreads.threads[item.id] || [];
 
       return (
         <View key={`message-container-${item.id}`}>
@@ -148,6 +181,8 @@ export const MessageList: React.FC<MessageListProps> = ({
               {renderDateSeparator(new Date(item.created_at))}
             </View>
           )}
+          
+          {/* Main Message */}
           <Message
             key={`message-${item.id}`}
             message={item}
@@ -160,11 +195,41 @@ export const MessageList: React.FC<MessageListProps> = ({
             onReaction={onReaction}
             onUserPress={onUserPress}
           />
+          
+          {/* Reply Messages */}
+          {replies.length > 0 && (
+            <View style={{ 
+              marginLeft: 60, 
+              marginTop: 8, 
+              paddingLeft: 12, 
+              borderLeftWidth: 3, 
+              borderLeftColor: '#E5E7EB',
+              backgroundColor: '#F9FAFB',
+              borderRadius: 8,
+              paddingVertical: 4
+            }}>
+              {replies.map((reply, replyIndex) => (
+                <View key={`reply-${reply.id}`} style={{ marginBottom: replyIndex === replies.length - 1 ? 0 : 8 }}>
+                  <Message
+                    message={reply}
+                    currentUserId={currentUserId}
+                    showAvatar={true}
+                    isGrouped={false}
+                    onReply={onReply}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onReaction={onReaction}
+                    onUserPress={onUserPress}
+                  />
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       );
     },
     [
-      messages.length,
+      messageThreads,
       shouldGroupMessage,
       shouldShowDateSeparator,
       renderDateSeparator,
@@ -255,7 +320,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   }
 
   // Show empty state
-  if (messages.length === 0 && !isLoading) {
+  if (messageThreads.mainMessages.length === 0 && !isLoading) {
     return <EmptyState />;
   }
 
@@ -263,7 +328,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     <View className="flex-1 relative">
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={messageThreads.mainMessages}
         renderItem={renderMessage}
         keyExtractor={keyExtractor}
         showsVerticalScrollIndicator={false}
@@ -286,7 +351,7 @@ export const MessageList: React.FC<MessageListProps> = ({
         contentContainerStyle={{
           paddingTop: 8,
           paddingBottom: 8,
-          flexGrow: messages.length === 0 ? 1 : undefined,
+          flexGrow: messageThreads.mainMessages.length === 0 ? 1 : undefined,
         }}
         removeClippedSubviews={true}
         maxToRenderPerBatch={20}

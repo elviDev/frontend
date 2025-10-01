@@ -9,6 +9,9 @@ import {
   RefreshControl,
   StatusBar,
   Linking,
+  Image,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -29,11 +32,16 @@ import { useToast } from '../../contexts/ToastContext';
 import { userService, User, UpdateUserData, ChangePasswordData } from '../../services/api/userService';
 import { AuthError } from '../../services/api/authService';
 import { useAuth } from '../../hooks/useAuth';
+import { useDispatch } from 'react-redux';
+import { updateUserProfile, updateUser } from '../../store/slices/authSlice';
+import type { AppDispatch } from '../../store/store';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { announcementService, CreateAnnouncementData } from '../../services/api/announcementService';
 import { useUI } from '../../components/common/UIProvider';
 import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { LanguageSwitcher } from '../../components/common/LanguageSwitcher';
+import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType } from 'react-native-image-picker';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -48,6 +56,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
   const { user: currentUser, logout } = useAuth();
   const { showError, showSuccess, showInfo, showToast } = useToast();
   const { showConfirm } = useUI();
+  const dispatch = useDispatch<AppDispatch>();
 
   // State
   const [user, setUser] = useState<User | null>(null);
@@ -58,6 +67,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isCreatingAnnouncement, setIsCreatingAnnouncement] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [showImageViewer, setShowImageViewer] = useState(false);
 
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -206,10 +217,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
     let isValid = true;
 
     if (!editForm.name.trim()) {
-      errors.name = 'Name is required';
+      errors.name = t('profile.nameRequired');
       isValid = false;
     } else if (editForm.name.trim().length < 2) {
-      errors.name = 'Name must be at least 2 characters';
+      errors.name = t('profile.nameTooShort');
       isValid = false;
     }
 
@@ -222,20 +233,20 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
     let isValid = true;
 
     if (!passwordForm.currentPassword) {
-      errors.currentPassword = 'Current password is required';
+      errors.currentPassword = t('profile.currentPasswordRequired');
       isValid = false;
     }
 
     if (!passwordForm.newPassword) {
-      errors.newPassword = 'New password is required';
+      errors.newPassword = t('profile.newPasswordRequired');
       isValid = false;
     } else if (passwordForm.newPassword.length < 8) {
-      errors.newPassword = 'Password must be at least 8 characters';
+      errors.newPassword = t('profile.passwordTooShort');
       isValid = false;
     }
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      errors.confirmPassword = 'Passwords do not match';
+      errors.confirmPassword = t('profile.passwordsDoNotMatch');
       isValid = false;
     }
 
@@ -262,14 +273,21 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
       let updatedUser: User;
       if (isOwnProfile) {
-        updatedUser = await userService.updateCurrentUser(updateData);
+        // Use Redux action for own profile to sync across app
+        const result = await dispatch(updateUserProfile(updateData));
+        if (updateUserProfile.fulfilled.match(result)) {
+          updatedUser = result.payload;
+        } else {
+          throw new Error(result.payload as string);
+        }
       } else {
+        // For other users, still use direct service call
         updatedUser = await userService.updateUser(targetUserId!, updateData);
       }
       
       setUser(updatedUser);
       setShowEditModal(false);
-      showSuccess('Profile updated successfully!');
+      showSuccess(t('profile.profileUpdatedSuccess'));
       
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -304,7 +322,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
         confirmPassword: '',
       });
       setShowPasswordModal(false);
-      showSuccess('Password changed successfully!');
+      showSuccess(t('profile.passwordChangedSuccess'));
       
     } catch (error) {
       console.error('Failed to change password:', error);
@@ -418,6 +436,182 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
     );
   };
 
+  const handleAvatarPress = () => {
+    if (!isOwnProfile) {
+      return; // Do nothing if not own profile
+    }
+
+    if (user?.avatar_url) {
+      // Show full-screen image viewer if user has profile picture
+      setShowImageViewer(true);
+    } else {
+      // Show image picker directly if no profile picture exists
+      showImagePickerAlert();
+    }
+  };
+
+  const showImagePickerAlert = () => {
+    if (!isOwnProfile || !targetUserId) {
+      showError('You can only upload your own profile picture');
+      return;
+    }
+
+    Alert.alert(
+      t('profile.selectProfilePicture'),
+      t('profile.chooseImageSource'),
+      [
+        {
+          text: t('profile.camera'),
+          onPress: () => selectImageFromCamera(),
+        },
+        {
+          text: t('profile.gallery'),
+          onPress: () => selectImageFromLibrary(),
+        },
+        {
+          text: t('auth.cancel'),
+          style: 'cancel',
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const selectImageFromCamera = () => {
+    const options = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.8,
+      maxWidth: 800,
+      maxHeight: 800,
+    };
+
+    launchCamera(options, (response: ImagePickerResponse) => {
+      if (response.assets && response.assets[0] && !response.didCancel && !response.errorMessage) {
+        uploadProfilePicture(response.assets[0]);
+      } else if (response.errorMessage) {
+        showError('Failed to capture image: ' + response.errorMessage);
+      }
+    });
+  };
+
+  const selectImageFromLibrary = () => {
+    const options = {
+      mediaType: 'photo' as MediaType,
+      quality: 0.8,
+      maxWidth: 800,
+      maxHeight: 800,
+    };
+
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      if (response.assets && response.assets[0] && !response.didCancel && !response.errorMessage) {
+        uploadProfilePicture(response.assets[0]);
+      } else if (response.errorMessage) {
+        showError('Failed to select image: ' + response.errorMessage);
+      }
+    });
+  };
+
+  const uploadProfilePicture = async (asset: any) => {
+    if (!targetUserId) {
+      showError('User ID not found');
+      return;
+    }
+
+    try {
+      setIsUploadingImage(true);
+      
+      const fileName = asset.fileName || `profile_${Date.now()}.jpg`;
+      const mimeType = asset.type || 'image/jpeg';
+      
+      // Upload the image
+      const updatedUser = await userService.uploadProfilePicture(
+        targetUserId,
+        asset.uri,
+        fileName,
+        mimeType
+      );
+      
+      // Update the user state immediately with the new profile picture
+      setUser(updatedUser);
+      
+      // If this is own profile, sync with Redux
+      if (isOwnProfile) {
+        dispatch(updateUser(updatedUser));
+      }
+      
+      // Close any open modals
+      setShowImageViewer(false);
+      
+      // Show success message
+      showSuccess(t('profile.profilePictureUpdated'));
+      
+    } catch (error) {
+      console.error('Failed to upload profile picture:', error);
+      if (error instanceof AuthError) {
+        showError(error.message);
+      } else {
+        showError('Failed to upload profile picture. Please try again.');
+      }
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleDeleteProfilePicture = () => {
+    if (!isOwnProfile || !targetUserId) {
+      showError('You can only delete your own profile picture');
+      return;
+    }
+
+    if (!user?.avatar_url) {
+      showError('No profile picture to delete');
+      return;
+    }
+
+    showConfirm(
+      t('profile.deleteProfilePicture'),
+      t('profile.deleteProfilePictureConfirm'),
+      async () => {
+        try {
+          setIsUploadingImage(true);
+          
+          // Delete the profile picture
+          const updatedUser = await userService.deleteProfilePicture(targetUserId);
+          
+          // Update user state immediately
+          setUser(updatedUser);
+          
+          // If this is own profile, sync with Redux
+          if (isOwnProfile) {
+            dispatch(updateUser(updatedUser));
+          }
+          
+          // Close any open modals
+          setShowImageViewer(false);
+          
+          // Show success message
+          showSuccess(t('profile.profilePictureDeleted'));
+          
+        } catch (error) {
+          console.error('Failed to delete profile picture:', error);
+          if (error instanceof AuthError) {
+            showError(error.message);
+          } else {
+            showError('Failed to delete profile picture. Please try again.');
+          }
+        } finally {
+          setIsUploadingImage(false);
+        }
+      },
+      undefined,
+      {
+        confirmText: t('profile.delete'),
+        cancelText: t('auth.cancel'),
+        destructive: true,
+      }
+    );
+  };
+
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'ceo': return '#EF4444';
@@ -436,6 +630,15 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
     }
   };
 
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case 'ceo': return t('roles.ceo');
+      case 'manager': return t('roles.manager');
+      case 'staff': return t('roles.staff');
+      default: return role;
+    }
+  };
+
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString);
@@ -450,7 +653,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
   };
 
   const formatLastActive = (dateString?: string) => {
-    if (!dateString) return 'Never';
+    if (!dateString) return t('profile.never');
     
     try {
       const date = new Date(dateString);
@@ -458,12 +661,12 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
       const diffMs = now.getTime() - date.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
       
-      if (diffDays === 0) return 'Today';
-      if (diffDays === 1) return 'Yesterday';
-      if (diffDays < 7) return `${diffDays} days ago`;
-      if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+      if (diffDays === 0) return t('profile.today');
+      if (diffDays === 1) return t('profile.yesterday');
+      if (diffDays < 7) return t('profile.daysAgo', { count: diffDays });
+      if (diffDays < 30) return t('profile.weeksAgo', { count: Math.floor(diffDays / 7) });
       
-      return date.toLocaleDateString('en-US', {
+      return date.toLocaleDateString(i18n.language === 'es' ? 'es-ES' : 'en-US', {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -487,12 +690,12 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
       <View className="flex-1 bg-gray-50 items-center justify-center" style={{ paddingTop: insets.top }}>
         <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
         <IonIcon name="person-circle-outline" size={80} color="#9CA3AF" />
-        <Text className="text-gray-500 text-lg font-medium mt-4">User not found</Text>
+        <Text className="text-gray-500 text-lg font-medium mt-4">{t('profile.userNotFound')}</Text>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           className="bg-purple-600 px-6 py-3 rounded-xl mt-6"
         >
-          <Text className="text-white font-medium">Go Back</Text>
+          <Text className="text-white font-medium">{t('profile.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -515,7 +718,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             <MaterialIcon name="arrow-back" size={24} color="#374151" />
           </TouchableOpacity>
           <Text className="text-xl font-bold text-gray-900">
-            {isOwnProfile ? 'My Profile' : 'User Profile'}
+            {isOwnProfile ? t('profile.myProfile') : t('profile.userProfile')}
           </Text>
         </View>
         
@@ -524,7 +727,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             onPress={() => setShowEditModal(true)}
             className="bg-purple-600 px-4 py-2 rounded-xl"
           >
-            <Text className="text-white font-medium">Edit</Text>
+            <Text className="text-white font-medium">{t('profile.edit')}</Text>
           </TouchableOpacity>
         )}
       </Animated.View>
@@ -548,23 +751,71 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
           >
             {/* Avatar and Basic Info */}
             <View className="items-center mb-6">
-              <LinearGradient
-                colors={['#8B5CF6', '#3B82F6']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: 50,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 16,
-                }}
+              <TouchableOpacity
+                onPress={handleAvatarPress}
+                disabled={isUploadingImage}
+                activeOpacity={isOwnProfile ? 0.7 : 1}
+                className="relative"
               >
-                <Text className="text-white text-3xl font-bold">
-                  {user.name?.charAt(0)?.toUpperCase() || 'U'}
-                </Text>
-              </LinearGradient>
+                {user.avatar_url ? (
+                  <View className="relative">
+                    <Image
+                      source={{ uri: user.avatar_url }}
+                      style={{
+                        width: 100,
+                        height: 100,
+                        borderRadius: 50,
+                        marginBottom: 16,
+                      }}
+                      onError={() => {
+                        // Handle image loading error by falling back to gradient avatar
+                        setUser(prev => prev ? { ...prev, avatar_url: undefined } : null);
+                      }}
+                    />
+                    {isUploadingImage && (
+                      <View
+                        className="absolute inset-0 bg-black bg-opacity-50 rounded-full items-center justify-center"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <ActivityIndicator size="large" color="white" />
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <View className="relative">
+                    <LinearGradient
+                      colors={['#8B5CF6', '#3B82F6']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={{
+                        width: 100,
+                        height: 100,
+                        borderRadius: 50,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginBottom: 16,
+                      }}
+                    >
+                      <Text className="text-white text-3xl font-bold">
+                        {user.name?.charAt(0)?.toUpperCase() || 'U'}
+                      </Text>
+                      {isOwnProfile && (
+                        <View className="absolute inset-0 rounded-full bg-black bg-opacity-30 items-center justify-center">
+                          <IonIcon name="camera" size={20} color="white" />
+                        </View>
+                      )}
+                    </LinearGradient>
+                    {isUploadingImage && (
+                      <View
+                        className="absolute inset-0 bg-black bg-opacity-50 rounded-full items-center justify-center"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <ActivityIndicator size="large" color="white" />
+                      </View>
+                    )}
+                  </View>
+                )}
+              </TouchableOpacity>
 
               <Text className="text-2xl font-bold text-gray-900 mb-2">{user.name}</Text>
               <Text className="text-gray-600 text-lg mb-3">{user.email}</Text>
@@ -583,7 +834,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   className="font-semibold ml-2 capitalize"
                   style={{ color: getRoleColor(user.role) }}
                 >
-                  {user.role}
+                  {getRoleDisplayName(user.role)}
                 </Text>
               </View>
 
@@ -598,7 +849,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   className="ml-2 text-sm font-medium"
                   style={{ color: user.email_verified ? "#10B981" : "#F59E0B" }}
                 >
-                  {user.email_verified ? 'Email Verified' : 'Email Not Verified'}
+                  {user.email_verified ? t('profile.emailVerified') : t('profile.emailNotVerified')}
                 </Text>
               </View>
             </View>
@@ -609,7 +860,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             entering={FadeInUp.delay(400).duration(600).springify()}
             className="bg-white mx-4 mt-4 rounded-2xl p-6 shadow-sm"
           >
-            <Text className="text-lg font-bold text-gray-900 mb-4">Profile Information</Text>
+            <Text className="text-lg font-bold text-gray-900 mb-4">{t('profile.profileInformation')}</Text>
             
             <View className="space-y-4">
               {/* Department */}
@@ -618,9 +869,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="business-outline" size={20} color="#3B82F6" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Department</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.department')}</Text>
                   <Text className="text-gray-900 font-medium">
-                    {user.department || 'Not specified'}
+                    {user.department || t('profile.notSpecified')}
                   </Text>
                 </View>
               </View>
@@ -631,9 +882,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="briefcase-outline" size={20} color="#10B981" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Job Title</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.jobTitle')}</Text>
                   <Text className="text-gray-900 font-medium">
-                    {user.job_title || 'Not specified'}
+                    {user.job_title || t('profile.notSpecified')}
                   </Text>
                 </View>
               </View>
@@ -644,9 +895,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="call-outline" size={20} color="#8B5CF6" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Phone</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.phone')}</Text>
                   <Text className="text-gray-900 font-medium">
-                    {user.phone || 'Not specified'}
+                    {user.phone || t('profile.notSpecified')}
                   </Text>
                 </View>
                 {user.phone && (
@@ -665,9 +916,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="time-outline" size={20} color="#F59E0B" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Timezone</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.timezone')}</Text>
                   <Text className="text-gray-900 font-medium">
-                    {user.timezone || 'Not specified'}
+                    {user.timezone || t('profile.notSpecified')}
                   </Text>
                 </View>
               </View>
@@ -678,9 +929,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="language-outline" size={20} color="#EF4444" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Language</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.language')}</Text>
                   <Text className="text-gray-900 font-medium">
-                    {user.language_preference === 'en' ? 'English' : user.language_preference || 'English'}
+                    {user.language_preference === 'en' ? t('profile.english') : user.language_preference === 'es' ? t('profile.spanish') : t('profile.english')}
                   </Text>
                 </View>
               </View>
@@ -692,7 +943,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             entering={FadeInUp.delay(600).duration(600).springify()}
             className="bg-white mx-4 mt-4 rounded-2xl p-6 shadow-sm"
           >
-            <Text className="text-lg font-bold text-gray-900 mb-4">Account Information</Text>
+            <Text className="text-lg font-bold text-gray-900 mb-4">{t('profile.accountInformation')}</Text>
             
             <View className="space-y-4">
               {/* Member Since */}
@@ -701,7 +952,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="calendar-outline" size={20} color="#6366F1" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Member Since</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.memberSince')}</Text>
                   <Text className="text-gray-900 font-medium">
                     {formatDate(user.created_at)}
                   </Text>
@@ -714,7 +965,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="pulse-outline" size={20} color="#10B981" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Last Active</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.lastActive')}</Text>
                   <Text className="text-gray-900 font-medium">
                     {formatLastActive(user.last_active)}
                   </Text>
@@ -727,7 +978,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="refresh-outline" size={20} color="#F59E0B" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm text-gray-500 mb-1">Profile Updated</Text>
+                  <Text className="text-sm text-gray-500 mb-1">{t('profile.profileUpdated')}</Text>
                   <Text className="text-gray-900 font-medium">
                     {formatDate(user.updated_at)}
                   </Text>
@@ -751,8 +1002,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                   <IonIcon name="key-outline" size={20} color="#F59E0B" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-gray-900 font-semibold">Change Password</Text>
-                  <Text className="text-gray-500 text-sm">Update your account password</Text>
+                  <Text className="text-gray-900 font-semibold">{t('profile.changePassword')}</Text>
+                  <Text className="text-gray-500 text-sm">{t('profile.updatePassword')}</Text>
                 </View>
                 <IonIcon name="chevron-forward" size={20} color="#9CA3AF" />
               </TouchableOpacity>
@@ -767,8 +1018,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                     <IonIcon name="megaphone-outline" size={20} color="#8B5CF6" />
                   </View>
                   <View className="flex-1">
-                    <Text className="text-gray-900 font-semibold">Create Announcement</Text>
-                    <Text className="text-gray-500 text-sm">Send company-wide announcements</Text>
+                    <Text className="text-gray-900 font-semibold">{t('profile.createAnnouncement')}</Text>
+                    <Text className="text-gray-500 text-sm">{t('profile.sendCompanyAnnouncements')}</Text>
                   </View>
                   <IonIcon name="chevron-forward" size={20} color="#9CA3AF" />
                 </TouchableOpacity>
@@ -784,8 +1035,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                     <IonIcon name="settings-outline" size={20} color="#EF4444" />
                   </View>
                   <View className="flex-1">
-                    <Text className="text-gray-900 font-semibold">Admin Dashboard</Text>
-                    <Text className="text-gray-500 text-sm">Access admin functions</Text>
+                    <Text className="text-gray-900 font-semibold">{t('profile.adminDashboard')}</Text>
+                    <Text className="text-gray-500 text-sm">{t('profile.accessAdminFunctions')}</Text>
                   </View>
                   <IonIcon name="chevron-forward" size={20} color="#9CA3AF" />
                 </TouchableOpacity>
@@ -828,7 +1079,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
           <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '85%' }}>
             <View className="flex-row items-center justify-between mb-6">
-              <Text className="text-2xl font-bold text-gray-900">Edit Profile</Text>
+              <Text className="text-2xl font-bold text-gray-900">{t('profile.editProfile')}</Text>
               <TouchableOpacity
                 onPress={() => setShowEditModal(false)}
                 className="p-2"
@@ -840,10 +1091,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Name */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Full Name *</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.fullName')} *</Text>
                 <View className={`bg-gray-50 rounded-xl px-4 py-3 border ${formErrors.name ? 'border-red-300' : 'border-gray-200'}`}>
                   <TextInput
-                    placeholder="Enter your full name"
+                    placeholder={t('profile.enterFullName')}
                     value={editForm.name}
                     onChangeText={(text) => {
                       setEditForm(prev => ({ ...prev, name: text }));
@@ -860,10 +1111,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* Department */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Department</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.department')}</Text>
                 <View className="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
                   <TextInput
-                    placeholder="Enter your department"
+                    placeholder={t('profile.enterDepartment')}
                     value={editForm.department}
                     onChangeText={(text) => setEditForm(prev => ({ ...prev, department: text }))}
                     className="text-gray-900 text-base"
@@ -874,10 +1125,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* Job Title */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Job Title</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.jobTitle')}</Text>
                 <View className="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
                   <TextInput
-                    placeholder="Enter your job title"
+                    placeholder={t('profile.enterJobTitle')}
                     value={editForm.job_title}
                     onChangeText={(text) => setEditForm(prev => ({ ...prev, job_title: text }))}
                     className="text-gray-900 text-base"
@@ -888,10 +1139,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* Phone */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Phone Number</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.phone')}</Text>
                 <View className="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
                   <TextInput
-                    placeholder="Enter your phone number"
+                    placeholder={t('profile.enterPhoneNumber')}
                     value={editForm.phone}
                     onChangeText={(text) => setEditForm(prev => ({ ...prev, phone: text }))}
                     className="text-gray-900 text-base"
@@ -903,10 +1154,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* Timezone */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Timezone</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.timezone')}</Text>
                 <View className="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
                   <TextInput
-                    placeholder="Enter your timezone (e.g., UTC-5, EST)"
+                    placeholder={t('profile.enterTimezone')}
                     value={editForm.timezone}
                     onChangeText={(text) => setEditForm(prev => ({ ...prev, timezone: text }))}
                     className="text-gray-900 text-base"
@@ -922,7 +1173,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 onPress={() => setShowEditModal(false)}
                 className="flex-1 bg-gray-100 rounded-xl py-4"
               >
-                <Text className="text-gray-700 font-medium text-center">Cancel</Text>
+                <Text className="text-gray-700 font-medium text-center">{t('auth.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleSaveProfile}
@@ -930,7 +1181,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 className={`flex-1 rounded-xl py-4 ${isEditing ? 'bg-gray-300' : 'bg-purple-600'}`}
               >
                 <Text className="text-white font-medium text-center">
-                  {isEditing ? 'Saving...' : 'Save Changes'}
+                  {isEditing ? t('profile.saving') : t('profile.saveChanges')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -948,7 +1199,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
           <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '70%' }}>
             <View className="flex-row items-center justify-between mb-6">
-              <Text className="text-2xl font-bold text-gray-900">Change Password</Text>
+              <Text className="text-2xl font-bold text-gray-900">{t('profile.changePassword')}</Text>
               <TouchableOpacity
                 onPress={() => setShowPasswordModal(false)}
                 className="p-2"
@@ -960,10 +1211,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Current Password */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Current Password *</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.currentPassword')} *</Text>
                 <View className={`bg-gray-50 rounded-xl px-4 py-3 border ${formErrors.currentPassword ? 'border-red-300' : 'border-gray-200'}`}>
                   <TextInput
-                    placeholder="Enter current password"
+                    placeholder={t('profile.enterCurrentPassword')}
                     value={passwordForm.currentPassword}
                     onChangeText={(text) => {
                       setPasswordForm(prev => ({ ...prev, currentPassword: text }));
@@ -981,10 +1232,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* New Password */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">New Password *</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.newPassword')} *</Text>
                 <View className={`bg-gray-50 rounded-xl px-4 py-3 border ${formErrors.newPassword ? 'border-red-300' : 'border-gray-200'}`}>
                   <TextInput
-                    placeholder="Enter new password"
+                    placeholder={t('profile.enterNewPassword')}
                     value={passwordForm.newPassword}
                     onChangeText={(text) => {
                       setPasswordForm(prev => ({ ...prev, newPassword: text }));
@@ -1002,10 +1253,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
               {/* Confirm Password */}
               <View className="mb-6">
-                <Text className="text-gray-700 font-medium mb-2">Confirm New Password *</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('profile.confirmNewPassword')} *</Text>
                 <View className={`bg-gray-50 rounded-xl px-4 py-3 border ${formErrors.confirmPassword ? 'border-red-300' : 'border-gray-200'}`}>
                   <TextInput
-                    placeholder="Confirm new password"
+                    placeholder={t('profile.confirmNewPasswordPlaceholder')}
                     value={passwordForm.confirmPassword}
                     onChangeText={(text) => {
                       setPasswordForm(prev => ({ ...prev, confirmPassword: text }));
@@ -1028,7 +1279,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 onPress={() => setShowPasswordModal(false)}
                 className="flex-1 bg-gray-100 rounded-xl py-4"
               >
-                <Text className="text-gray-700 font-medium text-center">Cancel</Text>
+                <Text className="text-gray-700 font-medium text-center">{t('auth.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleChangePassword}
@@ -1036,7 +1287,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 className={`flex-1 rounded-xl py-4 ${isEditing ? 'bg-gray-300' : 'bg-purple-600'}`}
               >
                 <Text className="text-white font-medium text-center">
-                  {isEditing ? 'Changing...' : 'Change Password'}
+                  {isEditing ? t('profile.changing') : t('profile.changePassword')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1054,7 +1305,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
           <View className="bg-white rounded-t-3xl p-6" style={{ maxHeight: '90%' }}>
             <View className="flex-row items-center justify-between mb-6">
-              <Text className="text-2xl font-bold text-gray-900">Create Announcement</Text>
+              <Text className="text-2xl font-bold text-gray-900">{t('announcements.createAnnouncement')}</Text>
               <TouchableOpacity
                 onPress={() => setShowAnnouncementModal(false)}
                 className="p-2"
@@ -1066,10 +1317,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Title */}
               <View className="mb-4">
-                <Text className="text-gray-700 font-medium mb-2">Title *</Text>
+                <Text className="text-gray-700 font-medium mb-2">{t('announcements.title')} *</Text>
                 <View className={`bg-gray-50 rounded-xl px-4 py-3 border ${announcementErrors.title ? 'border-red-300' : 'border-gray-200'}`}>
                   <TextInput
-                    placeholder="Enter announcement title"
+                    placeholder={t('announcements.enterTitle')}
                     value={announcementForm.title}
                     onChangeText={(text) => {
                       setAnnouncementForm(prev => ({ ...prev, title: text }));
@@ -1216,7 +1467,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 onPress={() => setShowAnnouncementModal(false)}
                 className="flex-1 bg-gray-100 rounded-xl py-4"
               >
-                <Text className="text-gray-700 font-medium text-center">Cancel</Text>
+                <Text className="text-gray-700 font-medium text-center">{t('auth.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleCreateAnnouncement}
@@ -1229,6 +1480,94 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* Full-Screen Image Viewer Modal */}
+      <Modal
+        visible={showImageViewer}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImageViewer(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)' }}>
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setShowImageViewer(false)}
+          >
+            <View className="flex-1 items-center justify-center px-4">
+              {/* Close Button */}
+              <TouchableOpacity
+                onPress={() => setShowImageViewer(false)}
+                className="absolute top-12 right-4 z-10 bg-black bg-opacity-50 rounded-full p-3"
+                style={{ marginTop: insets.top }}
+              >
+                <IonIcon name="close" size={24} color="white" />
+              </TouchableOpacity>
+
+              {/* Profile Image */}
+              {user?.avatar_url && (
+                <Image
+                  source={{ uri: user.avatar_url }}
+                  style={{
+                    width: '90%',
+                    maxWidth: 400,
+                    aspectRatio: 1,
+                    borderRadius: 20,
+                  }}
+                  resizeMode="cover"
+                />
+              )}
+
+              {/* Action Buttons */}
+              <View className="absolute bottom-12 left-4 right-4 flex-row justify-center space-x-4">
+                {/* Change Picture Button */}
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowImageViewer(false);
+                    showImagePickerAlert();
+                  }}
+                  disabled={isUploadingImage}
+                  className="bg-purple-600 px-6 py-3 rounded-xl flex-row items-center"
+                  style={{ minWidth: 120 }}
+                >
+                  {isUploadingImage ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <>
+                      <IonIcon name="camera" size={20} color="white" />
+                      <Text className="text-white font-semibold ml-2">
+                        {t('profile.changePicture')}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Remove Picture Button */}
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowImageViewer(false);
+                    handleDeleteProfilePicture();
+                  }}
+                  disabled={isUploadingImage}
+                  className="bg-red-600 px-6 py-3 rounded-xl flex-row items-center"
+                  style={{ minWidth: 120 }}
+                >
+                  {isUploadingImage ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <>
+                      <IonIcon name="trash" size={20} color="white" />
+                      <Text className="text-white font-semibold ml-2">
+                        {t('profile.removePicture')}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
         </View>
       </Modal>
     </View>

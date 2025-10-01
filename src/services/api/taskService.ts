@@ -101,139 +101,6 @@ class TaskService {
     this.baseUrl = API_BASE_URL;
   }
 
-  /**
-   * Check if using mock authentication in development
-   */
-  private async isUsingMockAuth(): Promise<boolean> {
-    const token = await authService.getAccessToken();
-    return token?.startsWith('dev-') || false;
-  }
-
-  /**
-   * Get mock API response for development
-   */
-  private async getMockApiResponse(endpoint: string, config: RequestInit): Promise<any> {
-    console.log('🎭 Using mock API response for:', endpoint);
-    
-    // Mock task data
-    const mockTasks: Task[] = [
-      {
-        id: 'task-1',
-        title: 'Review quarterly reports',
-        description: 'Analyze Q3 performance metrics and prepare presentation for board meeting',
-        status: 'in_progress',
-        priority: 'high',
-        task_type: 'general',
-        assigned_to: ['dev-user-id'],
-        created_by: 'dev-user-id',
-        owned_by: 'dev-user-id',
-        channel_id: 'channel-1',
-        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        progress_percentage: 60,
-        complexity: 7,
-        estimated_hours: 8,
-        actual_hours: 5,
-        tags: ['reports', 'quarterly'],
-        watchers: [],
-        voice_created: false,
-        business_value: 'high',
-        labels: {},
-        custom_fields: {},
-        subtasks: [],
-        comments: [],
-        attachments: [],
-        dependencies: []
-      },
-      {
-        id: 'task-2',
-        title: 'Update security protocols',
-        description: 'Implement new security measures across all systems',
-        status: 'pending',
-        priority: 'critical',
-        task_type: 'project',
-        assigned_to: ['dev-user-id'],
-        created_by: 'dev-user-id',
-        owned_by: 'dev-user-id',
-        channel_id: 'channel-1',
-        due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        progress_percentage: 0,
-        complexity: 9,
-        estimated_hours: 12,
-        actual_hours: 0,
-        tags: ['security', 'protocols'],
-        watchers: [],
-        voice_created: false,
-        business_value: 'critical',
-        labels: {},
-        custom_fields: {},
-        subtasks: [],
-        comments: [],
-        attachments: [],
-        dependencies: []
-      }
-    ];
-
-    // Mock task stats
-    const mockStats: TaskStats = {
-      totalTasks: 15,
-      tasksByStatus: {
-        pending: 4,
-        in_progress: 2,
-        review: 1,
-        completed: 8,
-        cancelled: 0,
-        on_hold: 0
-      },
-      tasksByPriority: {
-        low: 2,
-        medium: 6,
-        high: 4,
-        urgent: 2,
-        critical: 1
-      },
-      overdueTasks: 1,
-      completedThisWeek: 3,
-      averageCompletionTime: 72
-    };
-
-    // Return appropriate mock response based on endpoint
-    if (endpoint.includes('/tasks/stats')) {
-      return {
-        success: true,
-        data: mockStats,
-        timestamp: new Date().toISOString()
-      };
-    } else if (endpoint === '/tasks') {
-      return {
-        success: true,
-        data: mockTasks,
-        pagination: {
-          total: mockTasks.length,
-          limit: 50,
-          offset: 0,
-          hasMore: false
-        },
-        timestamp: new Date().toISOString()
-      };
-    } else if (endpoint.match(/\/tasks\/[^/]+$/)) {
-      return {
-        success: true,
-        data: mockTasks[0],
-        timestamp: new Date().toISOString()
-      };
-    }
-
-    // Default response
-    return {
-      success: true,
-      data: [],
-      timestamp: new Date().toISOString()
-    };
-  }
 
   /**
    * Make authenticated API request
@@ -502,12 +369,9 @@ class TaskService {
       throw new Error('Offset must be non-negative');
     }
     
-    // Sanitize search term
-    const sanitizedTerm = searchTerm.trim().replace(/[<>"'&]/g, '');
-    
+    // Use proper search parameter instead of tags workaround
     return this.getTasks({
-      // Note: This would be handled by the backend's search implementation
-      tags: [sanitizedTerm], // Temporary implementation - backend should handle full-text search
+      search: searchTerm.trim(),
       limit,
       offset
     });
@@ -607,7 +471,7 @@ class TaskService {
     }
     
     return this.getTasks({
-      tags: ['voice-created'],
+      voiceCreated: true,
       limit
     });
   }
@@ -785,31 +649,6 @@ class TaskService {
     
     console.log('📋 TaskService getTaskComments:', { taskId });
     
-    // Check if using mock auth for development
-    if (await this.isUsingMockAuth()) {
-      console.log('🎭 Using mock comments for development');
-      return {
-        success: true,
-        data: [
-          {
-            id: 'comment-1',
-            content: 'This is a sample comment for testing',
-            author: {
-              id: 'dev-user-id',
-              name: 'Development User',
-              avatar: 'D',
-              role: 'Developer',
-              email: 'dev@company.com'
-            },
-            timestamp: new Date(Date.now() - 60000), // 1 minute ago
-            reactions: { thumbs_up: 0, thumbs_down: 0 },
-            userReactions: {}
-          }
-        ],
-        timestamp: new Date().toISOString()
-      };
-    }
-    
     // Add timestamp to prevent any HTTP caching
     const timestamp = Date.now();
     return this.makeRequest<CommentsListResponse>(`/tasks/${taskId}/comments?t=${timestamp}`);
@@ -864,31 +703,6 @@ class TaskService {
     });
     
     try {
-      // Check if using mock auth for development
-      if (await this.isUsingMockAuth()) {
-        console.log('🎭 Using mock comment creation for development');
-        const mockComment: TaskComment = {
-          id: `comment-${Date.now()}`,
-          content: payload.content,
-          author: {
-            id: authorId || 'dev-user-id',
-            name: 'Development User',
-            avatar: 'D',
-            role: 'Developer',
-            email: 'dev@company.com'
-          },
-          timestamp: new Date(),
-          reactions: { thumbs_up: 0, thumbs_down: 0 },
-          userReactions: {}
-        };
-        
-        return {
-          success: true,
-          data: mockComment,
-          timestamp: new Date().toISOString()
-        };
-      }
-      
       const response = await this.makeRequest<CommentResponse>(`/tasks/${taskId}/comments`, {
         method: 'POST',
         body: JSON.stringify(payload),

@@ -14,6 +14,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { Avatar } from './Avatar';
 import IonIcon from 'react-native-vector-icons/Ionicons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
+import { useBackendTranslation } from '../../hooks/useBackendTranslation';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -56,6 +57,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   onOptionsPress,
   index,
 }) => {
+  const { translateChannelType, translateUserRole, translateBackendText } = useBackendTranslation();
   const scale = useSharedValue(1);
   const pressed = useSharedValue(false);
   const optionsPressed = useSharedValue(false);
@@ -105,28 +107,39 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
     };
   });
 
-  const handleOptionsPress = () => {
-    optionsPressed.value = true;
-    setTimeout(() => {
-      optionsPressed.value = false;
-      runOnJS(onOptionsPress)();
-    }, 100);
+  const handleOptionsPress = (event: any) => {
+    console.log('ChannelCard handleOptionsPress called for:', title);
+    console.log('onOptionsPress function:', typeof onOptionsPress, onOptionsPress);
+
+    // Prevent the parent TouchableOpacity from handling this event
+    if (event && event.stopPropagation) {
+      event.stopPropagation();
+    }
+
+    if (onOptionsPress) {
+      onOptionsPress();
+    } else {
+      console.error('onOptionsPress is not defined!');
+    }
   };
 
   return (
-    <AnimatedTouchableOpacity
+    <Animated.View
       entering={FadeInDown.delay(index * 150)
         .duration(600)
         .springify()
         .damping(12)
         .stiffness(100)}
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[animatedStyle]}
-      className="bg-white rounded-2xl p-4 mb-4 mx-4"
-      activeOpacity={1}
+      className="relative" // Add relative positioning for absolute positioning of options button
     >
+      <AnimatedTouchableOpacity
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={[animatedStyle]}
+        className="bg-white rounded-2xl p-4 mb-4 mx-4"
+        activeOpacity={1}
+      >
       <Animated.View
         style={{
           shadowColor: '#8B5CF6',
@@ -144,7 +157,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
               className="bg-green-100 px-3 py-1 rounded-full"
             >
               <Text className="text-green-600 text-xs font-medium">
-                {category}
+                {translateChannelType(category)}
               </Text>
             </Animated.View>
             {isPrivate && (
@@ -157,23 +170,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
               </Animated.View>
             )}
           </View>
-          <AnimatedTouchableOpacity
-            entering={FadeInUp.delay(index * 150 + 250).duration(400)}
-            className="bg-gray-50/80 hover:bg-purple-50 active:bg-purple-100 rounded-full p-2"
-            onPress={handleOptionsPress}
-            style={[
-              {
-                shadowColor: '#8B5CF6',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.08,
-                shadowRadius: 4,
-                elevation: 3,
-              },
-              optionsAnimatedStyle,
-            ]}
-          >
-            <MaterialIcon name="more-vert" size={18} color="#6B7280" />
-          </AnimatedTouchableOpacity>
+          {/* Placeholder for spacing where options button was */}
+          <View style={{ width: 34, height: 34 }} />
         </View>
 
         {/* Title and Description */}
@@ -278,6 +276,38 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           </View>
         </Animated.View>
       </Animated.View>
-    </AnimatedTouchableOpacity>
+      </AnimatedTouchableOpacity>
+      
+      {/* Options button positioned absolutely outside main touch area */}
+      <Animated.View
+        entering={FadeInUp.delay(index * 150 + 250).duration(400)}
+        style={{
+          position: 'absolute',
+          top: 16, // 4 (p-4) + some offset
+          right: 20, // 4 (mx-4) + some offset  
+          zIndex: 10,
+        }}
+      >
+        <AnimatedTouchableOpacity
+          className="bg-gray-50/80 hover:bg-purple-50 active:bg-purple-100 rounded-full p-2"
+          onPress={handleOptionsPress}
+          onPressIn={() => console.log('Options button pressed IN')}
+          onPressOut={() => console.log('Options button pressed OUT')}
+          activeOpacity={0.7}
+          style={[
+            {
+              shadowColor: '#8B5CF6',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.08,
+              shadowRadius: 4,
+              elevation: 10, // Higher elevation to ensure it's on top
+            },
+            optionsAnimatedStyle,
+          ]}
+        >
+          <MaterialIcon name="more-vert" size={18} color="#6B7280" />
+        </AnimatedTouchableOpacity>
+      </Animated.View>
+    </Animated.View>
   );
 };

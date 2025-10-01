@@ -110,6 +110,23 @@ export const refreshToken = createAsyncThunk(
   }
 );
 
+export const updateUserProfile = createAsyncThunk(
+  'auth/updateUserProfile',
+  async (updateData: any, { rejectWithValue, dispatch }) => {
+    try {
+      const { userService } = await import('../../services/api/userService');
+      const updatedUser = await userService.updateCurrentUser(updateData);
+      
+      // Dispatch the user update to sync across the app
+      dispatch(updateUser(updatedUser));
+      
+      return updatedUser;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to update user profile');
+    }
+  }
+);
+
 export const authSlice = createSlice({
   name: 'auth',
   initialState,
@@ -137,6 +154,9 @@ export const authSlice = createSlice({
         state.tokens.refreshToken = action.payload.refreshToken;
         state.tokens.expiresIn = action.payload.expiresAt;
       }
+    },
+    updateUser: (state, action: PayloadAction<User>) => {
+      state.user = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -272,10 +292,25 @@ export const authSlice = createSlice({
       state.isAuthenticated = false;
       state.user = null;
       state.tokens = null;
+    })
+
+    // Update user profile
+    .addCase(updateUserProfile.pending, (state) => {
+      state.isLoading = true;
+      state.error = null;
+    })
+    .addCase(updateUserProfile.fulfilled, (state, action) => {
+      state.user = action.payload;
+      state.isLoading = false;
+      state.error = null;
+    })
+    .addCase(updateUserProfile.rejected, (state, action) => {
+      state.isLoading = false;
+      state.error = action.payload as string;
     });
   },
 });
 
-export const { clearError, setAuthenticated, clearAuth, updateTokensFromManager } = authSlice.actions;
+export const { clearError, setAuthenticated, clearAuth, updateTokensFromManager, updateUser } = authSlice.actions;
 
 export default authSlice.reducer;

@@ -27,7 +27,6 @@ import { Task, CreateTaskData, TaskPriority, TaskStatus, TaskType } from '../../
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { useToast } from '../../contexts/ToastContext';
 import { TaskCard } from '../../components/task/TaskCard';
-import { SEED_TASKS, SEED_USERS } from '../../data/seedData';
 import Icon from 'react-native-vector-icons/Feather';
 
 interface TaskFormData {
@@ -74,7 +73,6 @@ export const AdminTaskManagement: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'all'>('all');
   const [filterPriority, setFilterPriority] = useState<TaskPriority | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSeedDataModal, setShowSeedDataModal] = useState(false);
 
   useEffect(() => {
     loadTasks();
@@ -194,33 +192,6 @@ export const AdminTaskManagement: React.FC = () => {
     setShowEditModal(true);
   };
 
-  const loadSeedData = async () => {
-    try {
-      // Create tasks from seed data
-      for (const seedTask of SEED_TASKS) {
-        const taskData: CreateTaskData = {
-          title: seedTask.title,
-          description: seedTask.description,
-          priority: seedTask.priority,
-          category: seedTask.category,
-          assigned_to: seedTask.assignees?.map(a => a.id) || [],
-          channel_id: seedTask.channelId,
-          tags: seedTask.tags || [],
-          due_date: seedTask.dueDate,
-          estimated_hours: seedTask.estimatedHours,
-          created_by: user?.id || 'admin',
-        };
-
-        await dispatch(createTask(taskData)).unwrap();
-      }
-
-      toast.showSuccess(`Created ${SEED_TASKS.length} seed tasks`);
-      setShowSeedDataModal(false);
-      loadTasks();
-    } catch (error) {
-      toast.showError('Failed to load seed data');
-    }
-  };
 
   const handleBulkStatusUpdate = (status: TaskStatus) => {
     if (selectedTasks.size === 0) return;
@@ -361,12 +332,6 @@ export const AdminTaskManagement: React.FC = () => {
         <View className="flex-row items-center justify-between mb-4">
           <Text className="text-gray-900 text-2xl font-bold">Task Management</Text>
           <View className="flex-row">
-            <TouchableOpacity
-              onPress={() => setShowSeedDataModal(true)}
-              className="bg-green-100 px-3 py-2 rounded-lg mr-2"
-            >
-              <Text className="text-green-700 text-sm font-medium">Seed Data</Text>
-            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setShowCreateModal(true)}
               className="bg-blue-500 px-3 py-2 rounded-lg"
@@ -589,37 +554,6 @@ export const AdminTaskManagement: React.FC = () => {
         <TaskForm isEdit />
       </Modal>
 
-      {/* Seed Data Modal */}
-      <Modal
-        visible={showSeedDataModal}
-        transparent
-        animationType="fade"
-      >
-        <View className="flex-1 bg-black/50 justify-center items-center p-6">
-          <View className="bg-white rounded-xl p-6 w-full max-w-md">
-            <Text className="text-xl font-bold mb-4">Load Seed Data</Text>
-            <Text className="text-gray-600 mb-6">
-              This will create {SEED_TASKS.length} sample tasks with realistic project scenarios. 
-              This helps populate the app with example data for testing.
-            </Text>
-            
-            <View className="flex-row justify-end">
-              <TouchableOpacity
-                onPress={() => setShowSeedDataModal(false)}
-                className="bg-gray-100 px-4 py-2 rounded-lg mr-2"
-              >
-                <Text className="text-gray-700 font-medium">Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={loadSeedData}
-                className="bg-green-500 px-4 py-2 rounded-lg"
-              >
-                <Text className="text-white font-medium">Load Seed Data</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };

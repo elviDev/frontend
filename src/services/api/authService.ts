@@ -239,7 +239,7 @@ class AuthService {
       const isConnected = await this.testConnection();
       if (!isConnected) {
         throw new AuthError(
-          'Cannot connect to backend server. Please ensure the backend is running at https://backend-sy9q.onrender.com',
+          'Cannot connect to backend server. Please ensure the backend is running at' + API_BASE_URL,
           'CONNECTION_FAILED',
           0
         );

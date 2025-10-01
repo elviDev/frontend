@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import Animated, { 
   FadeInUp, 
-  useAnimatedStyle, 
-  useSharedValue,
+  useAnimatedStyle,
 } from 'react-native-reanimated';
-import LinearGradient from 'react-native-linear-gradient';
+
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { TaskComment, TaskAssignee } from '../../types/task.types';
 import { Avatar } from '../common/Avatar';
@@ -76,10 +75,6 @@ export const TaskCommentsCard: React.FC<TaskCommentsCardProps> = ({
   const [editingText, setEditingText] = useState('');
   const [showCommentActionSheet, setShowCommentActionSheet] = useState(false);
   const [selectedComment, setSelectedComment] = useState<TaskComment | null>(null);
-
-  const animatedCommentInputStyle = useAnimatedStyle(() => ({
-    transform: commentInputScale ? [{ scale: commentInputScale.value }] : [],
-  }));
 
   const canEditOrDelete = (comment: TaskComment) => {
     console.log('🔧 Full comment edit permission debug:', {
@@ -400,14 +395,8 @@ export const TaskCommentsCard: React.FC<TaskCommentsCardProps> = ({
   return (
     <Animated.View
       entering={FadeInUp.delay(600).duration(600)}
-      className="bg-white mx-6 mt-4 rounded-2xl p-6"
-      style={{
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        elevation: 1,
-      }}
+      className="mx-4"
+     
     >
       <Text className="text-lg font-bold text-gray-900 mb-6">
         Comments ({validComments.length})
@@ -644,7 +633,7 @@ export const TaskCommentsCard: React.FC<TaskCommentsCardProps> = ({
 
       {/* Add Comment Input - Only show if user can comment */}
       {canComment && (
-        <Animated.View style={animatedCommentInputStyle}>
+        <Animated.View >
           <PromptInput
             onSendMessage={content => {
               if (content.trim()) {

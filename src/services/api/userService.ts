@@ -311,13 +311,227 @@ class UserService {
     return response.success;
   }
 
-  // Upload avatar
-  async uploadAvatar(file: File | Blob, userId?: string): Promise<string> {
-    // This would typically use a file upload endpoint
-    // For now, we'll simulate with a placeholder
-    console.log('Avatar upload would be implemented here');
+  // Step 1: Initiate profile picture upload and get presigned URL
+  async initiateProfilePictureUpload(
+    userId: string, 
+    fileName: string, 
+    contentType: string, 
+    fileSize?: number
+  ): Promise<{ uploadUrl: string; fileId: string; downloadUrl?: string }> {
     
-    // Return placeholder URL for now
+    // Validate file before sending to backend
+    this.validateImageFile(fileName, contentType, fileSize);
+    
+    const response = await this.makeRequest<ApiResponse<{ uploadUrl: string; fileId: string; downloadUrl?: string }>>(
+      `/users/${userId}/profile-picture`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName,
+          contentType,
+          fileSize: fileSize || 0,
+          description: 'Profile Picture'
+        }),
+      }
+    );
+    return response.data;
+  }
+
+  // Step 3: Complete profile picture upload
+  async completeProfilePictureUpload(
+    userId: string, 
+    fileId: string, 
+    success: boolean, 
+    error?: string
+  ): Promise<User> {
+    const response = await this.makeRequest<ApiResponse<User>>(
+      `/users/${userId}/profile-picture/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ 
+          fileId, 
+          success,
+          error: error || null
+        }),
+      }
+    );
+    return response.data;
+  }
+
+  // Delete profile picture
+  async deleteProfilePicture(userId: string): Promise<User> {
+    const response = await this.makeRequest<ApiResponse<User>>(
+      `/users/${userId}/profile-picture`,
+      {
+        method: 'DELETE',
+      }
+    );
+    return response.data;
+  }
+
+  // Upload profile picture using backend's recommended 3-step S3 process
+  async uploadProfilePicture(userId: string, imageUri: string, fileName: string, mimeType: string): Promise<User> {
+    let uploadData: { uploadUrl: string; fileId: string; downloadUrl?: string } | null = null;
+    
+    try {
+      console.log('🖼️ Starting profile picture upload (3-step S3 process):', { userId, imageUri, fileName, mimeType });
+      
+      // Step 1: Initiate upload and get presigned URL
+      console.log('📤 Step 1: Initiating upload...');
+      uploadData = await this.initiateProfilePictureUpload(userId, fileName, mimeType);
+      console.log('✅ Upload initiated:', uploadData);
+      
+      // Step 2: Upload file directly to S3 using presigned URL
+      console.log('☁️ Step 2: Uploading to S3...');
+      const uploadSuccess = await this.uploadToS3(uploadData.uploadUrl, imageUri, mimeType);
+      console.log('✅ S3 upload success:', uploadSuccess);
+      
+      // Step 3: Complete the upload process with success
+      console.log('🏁 Step 3: Completing upload...');
+      const result = await this.completeProfilePictureUpload(userId, uploadData.fileId, true);
+      console.log('✅ Upload completed successfully:', result);
+      
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Profile picture upload error:', error);
+      
+      // If we got an upload data, complete with failure
+      if (uploadData?.fileId) {
+        try {
+          console.log('🔄 Completing upload with failure status...');
+          await this.completeProfilePictureUpload(userId, uploadData.fileId, false, error.message);
+        } catch (completeError) {
+          console.error('❌ Failed to complete upload with error status:', completeError);
+        }
+      }
+      
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError('Failed to upload profile picture: ' + error.message, 'UPLOAD_FAILED');
+    }
+  }
+
+  // Step 2: Upload file directly to S3
+  private async uploadToS3(uploadUrl: string, imageUri: string, mimeType: string): Promise<boolean> {
+    try {
+      console.log('☁️ Uploading to S3 URL:', uploadUrl);
+      
+      // For React Native, we need to create a proper file object
+      const fileObject = {
+        uri: imageUri,
+        type: mimeType,
+        name: 'profile-picture.jpg', // S3 doesn't care about the name
+      } as any;
+      
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': mimeType,
+        },
+        body: fileObject, // React Native will handle this properly
+      });
+      
+      console.log('☁️ S3 Response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+      
+      if (!response.ok) {
+        throw new Error(`S3 upload failed: ${response.statusText}`);
+      }
+      
+      return true;
+      
+    } catch (error) {
+      console.error('❌ S3 upload failed:', error);
+      throw new AuthError(`S3 upload failed: ${error.message}`, 'S3_UPLOAD_FAILED');
+    }
+  }
+
+  // Helper method to validate file before upload
+  private validateImageFile(fileName: string, mimeType: string, fileSize?: number): boolean {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    
+    if (!allowedTypes.includes(mimeType)) {
+      throw new AuthError('Please select a valid image file (JPEG, PNG, GIF, or WebP)', 'INVALID_FILE_TYPE');
+    }
+    
+    if (fileSize && fileSize > maxSize) {
+      throw new AuthError('File size must be less than 5MB', 'FILE_TOO_LARGE');
+    }
+    
+    return true;
+  }
+
+  // Alternative: Simple form-based upload (as suggested by backend)
+  async updateProfileWithPicture(
+    userId: string, 
+    profileData: Partial<User>, 
+    imageUri?: string, 
+    fileName?: string, 
+    mimeType?: string
+  ): Promise<User> {
+    try {
+      console.log('🖼️ Updating profile with picture (form-based):', { userId, profileData, imageUri });
+      
+      const formData = new FormData();
+      
+      // Add profile fields
+      Object.keys(profileData).forEach(key => {
+        const value = profileData[key as keyof User];
+        if (value !== null && value !== undefined) {
+          formData.append(key, String(value));
+        }
+      });
+      
+      // Add profile picture if provided
+      if (imageUri && fileName && mimeType) {
+        this.validateImageFile(fileName, mimeType);
+        
+        const fileObject = {
+          uri: imageUri,
+          type: mimeType,
+          name: fileName,
+        } as any;
+        
+        formData.append('profilePicture', fileObject);
+      }
+      
+      const token = await this.getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          // Don't set Content-Type for FormData - let browser set it with boundary
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error?.message || `Update failed with status ${response.status}`;
+        throw new AuthError(errorMessage, 'UPDATE_FAILED', response.status);
+      }
+      
+      const data = await response.json();
+      return data.data || data;
+      
+    } catch (error) {
+      console.error('❌ Profile update with picture failed:', error);
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError('Failed to update profile: ' + error.message, 'UPDATE_FAILED');
+    }
+  }
+
+  // Upload avatar (legacy method for backward compatibility)
+  async uploadAvatar(file: File | Blob, userId?: string): Promise<string> {
+    console.log('Avatar upload would be implemented here');
     return 'https://via.placeholder.com/150';
   }
 

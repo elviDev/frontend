@@ -48,6 +48,7 @@ export interface Message {
   user_email: string;
   user_avatar: string | null;
   user_role: string;
+  user_details?: UserDetails | null; // Optional user details object
 
   // Frontend-only fields for state management
   isOptimistic?: boolean;

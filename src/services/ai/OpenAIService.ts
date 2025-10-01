@@ -1,5 +1,6 @@
 import { OPENAI_API_KEY } from '@env';
 import { getAPIKey } from '../../config/apiKeys';
+import * as RNFS from 'react-native-fs';
 
 // Debug environment loading
 console.log('🔍 Environment loading debug:');
@@ -186,6 +187,117 @@ ${transcript}`;
     }
   }
 
+  async transcribeAudio(audioUri: string): Promise<string> {
+    if (!this.apiKey) {
+      console.warn('⚠️ OpenAI API key not configured, cannot transcribe audio');
+      throw new Error('OpenAI API key not configured');
+    }
+
+    try {
+      console.log('🎵 Starting OpenAI Whisper transcription for:', audioUri);
+      
+      // Determine audio format from file extension or default to wav
+      const fileExtension = audioUri.split('.').pop()?.toLowerCase() || 'wav';
+      const mimeType = fileExtension === 'mp3' ? 'audio/mp3' : 
+                      fileExtension === 'wav' ? 'audio/wav' : 
+                      fileExtension === 'webm' ? 'audio/webm' :
+                      fileExtension === 'm4a' ? 'audio/m4a' : 'audio/wav';
+      
+      // For React Native, we need to read the file and convert it properly
+      console.log('📁 Preparing file for upload...');
+      
+      // Check if file exists
+      const fileExists = await RNFS.exists(audioUri);
+      if (!fileExists) {
+        throw new Error(`Audio file not found at path: ${audioUri}`);
+      }
+      
+      // Get file stats
+      const fileStats = await RNFS.stat(audioUri);
+      console.log('📊 File stats:', {
+        size: fileStats.size,
+        path: audioUri,
+        extension: fileExtension,
+        mimeType
+      });
+      
+      // Create FormData for audio file upload
+      const formData = new FormData();
+      
+      // For React Native, we create the file object with proper format
+      const fileObject = {
+        uri: audioUri,
+        type: mimeType,
+        name: `audio.${fileExtension}`,
+      } as any;
+      
+      console.log('📁 File object for upload:', fileObject);
+      
+      formData.append('file', fileObject);
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'en');
+      formData.append('response_format', 'text');
+
+      console.log('🌐 Making request to OpenAI Whisper API...');
+      console.log('🔗 URL:', `${this.baseUrl}/audio/transcriptions`);
+      console.log('🔑 API Key present:', !!this.apiKey);
+      
+      const response = await fetch(`${this.baseUrl}/audio/transcriptions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          // Don't set Content-Type for FormData - let the browser set it with boundary
+        },
+        body: formData,
+      });
+      
+      console.log('📡 Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: response.headers
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('❌ Whisper API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+          body: errorData
+        });
+        
+        if (response.status === 401) {
+          throw new Error('Invalid OpenAI API key - please check your configuration');
+        } else if (response.status === 400) {
+          throw new Error(`Bad request - ${errorData}`);
+        } else if (response.status === 413) {
+          throw new Error('Audio file too large - maximum 25MB allowed');
+        } else {
+          throw new Error(`Whisper API Error: ${response.status} - ${errorData}`);
+        }
+      }
+
+      const transcription = await response.text();
+      console.log('✅ Whisper transcription successful:', transcription);
+      
+      if (!transcription || transcription.trim().length === 0) {
+        console.warn('⚠️ Received empty transcription from Whisper');
+        throw new Error('No speech detected in audio');
+      }
+      
+      return transcription.trim();
+    } catch (error) {
+      console.error('❌ Audio transcription failed:', {
+        error: error.message,
+        audioUri,
+        apiKeyPresent: !!this.apiKey,
+        apiKeyLength: this.apiKey?.length || 0
+      });
+      throw error;
+    }
+  }
+
   async checkHealth(): Promise<boolean> {
     if (!this.apiKey) {
       return false;
@@ -207,6 +319,11 @@ ${transcript}`;
       console.error('OpenAI health check failed:', error);
       return false;
     }
+  }
+
+  // Expose API key for direct integrations (like DirectWhisperRecorder)
+  getApiKey(): string {
+    return this.apiKey;
   }
 }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import { useAppTranslation } from '../hooks/useAppTranslation';
 import DashboardScreen  from '../screens/main/DashboardScreen';
 import { ActivityScreen } from '../screens/main/ActivityScreen';
 import { TasksScreen } from '../screens/main/TasksScreen';
@@ -14,9 +15,10 @@ interface TabIconProps {
   color: string;
   size: number;
   name: string;
+  translatedName: string;
 }
 
-const TabIcon: React.FC<TabIconProps> = ({ focused, name }) => {
+const TabIcon: React.FC<TabIconProps> = ({ focused, name, translatedName }) => {
   const getIcon = () => {
     switch (name) {
       case 'Home':
@@ -46,13 +48,30 @@ const TabIcon: React.FC<TabIconProps> = ({ focused, name }) => {
         }`}
         style={{ textAlign: 'center', maxWidth: 60 }}
       >
-        {name}
+        {translatedName}
       </Text>
     </View>
   );
 };
 
 export const TabNavigator: React.FC = () => {
+  const { navigation } = useAppTranslation();
+  
+  const getTranslatedName = (routeName: string): string => {
+    switch (routeName) {
+      case 'Home':
+        return navigation.home();
+      case 'Activity':
+        return navigation.activity();
+      case 'Tasks':
+        return navigation.tasks();
+      case 'Channels':
+        return navigation.channels();
+      default:
+        return routeName;
+    }
+  };
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -84,6 +103,7 @@ export const TabNavigator: React.FC = () => {
             color={color}
             size={size}
             name={route.name}
+            translatedName={getTranslatedName(route.name)}
           />
         ),
       })}

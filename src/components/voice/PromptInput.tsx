@@ -17,16 +17,11 @@ import Animated, {
   useAnimatedStyle,
   withRepeat,
   withTiming,
-  withSpring,
   interpolate,
   withSequence,
 } from 'react-native-reanimated';
 import LinearGradient from 'react-native-linear-gradient';
-import Voice from '../../services/voice/CustomVoice';
-import {
-  showVoiceErrorDialog,
-  runVoiceDiagnostics,
-} from '../../utils/voiceErrorHandler';
+import Voice from '@react-native-voice/voice';
 import {
   pick,
   types,
@@ -34,23 +29,14 @@ import {
 import {
   launchImageLibraryAsync,
   ImagePickerResult,
-  MediaTypeOptions,
 } from 'expo-image-picker';
-import CustomAudioRecorderPlayer from '../../services/audio/CustomAudioRecorderPlayer';
-import RNFS from 'react-native-fs';
 import Icon from 'react-native-vector-icons/Feather';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { EmojiPicker } from '../chat/EmojiPicker';
-import { openAIService } from '../../services/ai/OpenAIService';
-import { PermissionDialog } from '../common/PermissionDialog';
-import { ActionDialog } from '../common/ActionDialog';
-import { useActionDialog } from '../../hooks/useActionDialog';
 import { useToast } from '../../contexts/ToastContext';
 
 interface PromptInputProps {
   onSendMessage?: (text: string) => void;
-  onSendRecording?: (audioUri: string, transcript?: string) => void;
-  onSendVoiceMessage?: (audioUri: string, transcript?: string) => void; // Alias for compatibility
   onEditMessage?: (messageId: string, content: string) => void;
   onAttachFile?: (file: any) => void;
   onAttachImage?: (image: any) => void;
@@ -76,13 +62,7 @@ interface PromptInputProps {
   } | null;
   onCancelEdit?: () => void;
   autoFocus?: boolean;
-}
-
-interface RecordingState {
-  isRecording: boolean;
-  isPaused: boolean;
-  duration: number;
-  audioPath: string;
+  permissionMessage?: string;
 }
 
 interface MentionUser {
@@ -91,13 +71,8 @@ interface MentionUser {
   username: string;
 }
 
-// Channel members will be passed via props instead of hardcoded data
-
-
 export const PromptInput: React.FC<PromptInputProps> = ({
   onSendMessage,
-  onSendRecording,
-  onSendVoiceMessage,
   onEditMessage,
   onAttachFile,
   onAttachImage,
@@ -116,42 +91,199 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   editingMessage,
   onCancelEdit,
   autoFocus = false,
+  permissionMessage,
 }) => {
   const [text, setText] = useState('');
-  const [recording, setRecording] = useState<RecordingState>({
-    isRecording: false,
-    isPaused: false,
-    duration: 0,
-    audioPath: '',
-  });
-  const [voiceResults, setVoiceResults] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [, setAttachedFiles] = useState<any[]>([]);
   const [showAttachmentModal, setShowAttachmentModal] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
-  const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [selectionStart, setSelectionStart] = useState(0);
-  const [showPermissionDialog, setShowPermissionDialog] = useState(false);
 
-  const { dialogProps, showDialog, hideDialog } = useActionDialog();
   const { showError, showSuccess, showInfo } = useToast();
 
-  const audioRecorderPlayer = useRef(new CustomAudioRecorderPlayer()).current;
-  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
   const textInputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Animations
-  const recordingScale = useSharedValue(1);
-  const recordingOpacity = useSharedValue(0);
   const pulseAnimation = useSharedValue(0);
   const sendButtonScale = useSharedValue(1);
 
-  // Helper functions
+  // Voice Setup
+  useEffect(() => {
+    const setupVoice = async () => {
+      try {
+        // Check if Voice module is properly initialized
+        if (!Voice || typeof Voice.isAvailable !== 'function') {
+          console.log('Voice module not properly initialized');
+          return;
+        }
 
+        // Check if Voice is available first
+        const isAvailable = await Voice.isAvailable();
+        if (!isAvailable) {
+          console.log('Voice recognition not available on this device');
+          return;
+        }
 
+        // Setup event listeners with null checks
+        if (Voice.onSpeechStart) Voice.onSpeechStart = onSpeechStart;
+        if (Voice.onSpeechEnd) Voice.onSpeechEnd = onSpeechEnd;
+        if (Voice.onSpeechResults) Voice.onSpeechResults = onSpeechResults;
+        if (Voice.onSpeechError) Voice.onSpeechError = onSpeechError;
+
+        const androidPermissionChecking = async () => {
+          if (Platform.OS === 'android') {
+            const granted = await PermissionsAndroid.request(
+              PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+              {
+                title: 'Microphone Permission',
+                message: 'This app needs access to your microphone to recognize speech',
+                buttonNeutral: 'Ask Me Later',
+                buttonNegative: 'Cancel',
+                buttonPositive: 'OK',
+              }
+            );
+
+            if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+              console.log('Microphone permission granted');
+            } else {
+              console.log('Microphone permission denied');
+              showError('Microphone permission is required for voice input');
+            }
+
+            try {
+              const getService = await Voice.getSpeechRecognitionServices();
+              console.log('Speech recognition services:', getService);
+            } catch (error) {
+              console.log('Error getting speech services:', error);
+            }
+          }
+        };
+
+        await androidPermissionChecking();
+      } catch (error) {
+        console.log('Voice setup error:', error);
+      }
+    };
+
+    setupVoice();
+
+    return () => {
+      try {
+        // Clean up voice listeners and destroy instance
+        if (Voice && typeof Voice.destroy === 'function') {
+          Voice.destroy().then(() => {
+            if (Voice.removeAllListeners) {
+              Voice.removeAllListeners();
+            }
+          }).catch(console.warn);
+        }
+      } catch (error) {
+        console.warn('Voice cleanup error:', error);
+      }
+    };
+  }, []);
+
+  // Voice Event Handlers
+  const onSpeechStart = () => {
+    console.log('Speech recognition started');
+    setIsListening(true);
+  };
+
+  const onSpeechEnd = () => {
+    console.log('Speech recognition ended');
+    setIsListening(false);
+  };
+
+  const onSpeechResults = (event: any) => {
+    console.log('Speech results:', event);
+    if (event.value && event.value.length > 0) {
+      const recognizedText = event.value[0];
+      
+      // Get current cursor position or append to end
+      const cursorPos = selectionStart || text.length;
+      const textBefore = text.substring(0, cursorPos);
+      const textAfter = text.substring(cursorPos);
+      
+      // Add space before recognized text if there's existing text
+      const separator = textBefore.trim() ? ' ' : '';
+      const newText = textBefore + separator + recognizedText + textAfter;
+      
+      setText(newText);
+      
+      // Update cursor position to end of inserted text
+      const newCursorPos = cursorPos + separator.length + recognizedText.length;
+      setSelectionStart(newCursorPos);
+      
+      // Focus the text input
+      setTimeout(() => {
+        textInputRef.current?.focus();
+      }, 100);
+      
+      showSuccess('Voice input added!');
+    }
+  };
+
+  const onSpeechError = (error: any) => {
+    console.log('Speech error:', error);
+    setIsListening(false);
+    pulseAnimation.value = withTiming(0);
+    
+    // Handle different error codes more gracefully
+    if (error?.error?.code === '7' || error?.error?.message?.includes('No match')) {
+      // No match found - this is normal, just inform user
+      showInfo('No speech detected. Try speaking louder or closer to the microphone.');
+    } else if (error?.error?.code === '6') {
+      // No input
+      showInfo('No speech detected. Please try again.');
+    } else {
+      // Other errors
+      showError('Voice recognition error. Please try again.');
+    }
+  };
+
+  // Voice Control Functions
+  const startListening = async () => {
+    try {
+      if (!Voice || typeof Voice.start !== 'function') {
+        showError('Voice recognition not available');
+        return;
+      }
+      
+      await Voice.start('en-US');
+      setIsListening(true);
+      pulseAnimation.value = withRepeat(
+        withTiming(1, { duration: 1000 }),
+        -1,
+        true,
+      );
+      showInfo('Listening... Speak now');
+    } catch (error) {
+      console.log('Start listening error:', error);
+      showError('Failed to start voice recognition');
+    }
+  };
+
+  const stopListening = async () => {
+    try {
+      if (!Voice || typeof Voice.stop !== 'function') {
+        setIsListening(false);
+        pulseAnimation.value = withTiming(0);
+        return;
+      }
+      
+      await Voice.stop();
+      setIsListening(false);
+      pulseAnimation.value = withTiming(0);
+    } catch (error) {
+      console.log('Stop listening error:', error);
+    }
+  };
+
+  // Text handling functions
   const handleTextChange = (newText: string) => {
     setText(newText);
 
@@ -257,7 +389,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     }, 50);
   };
 
-
   // Filter channel members based on mention query
   const filteredMentionUsers = channelMembers.filter(
     user =>
@@ -296,304 +427,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     }
   }, [selectionStart]);
 
-  // Voice recognition setup
-  useEffect(() => {
-    // Debug voice system on component mount
-    // Debug voice system (functions removed during cleanup)
-
-    // Run comprehensive diagnostics
-    runVoiceDiagnostics();
-
-    try {
-      if (Voice.isModuleAvailable()) {
-        setVoiceAvailable(true);
-        Voice.onSpeechStart = onSpeechStart;
-        Voice.onSpeechRecognized = onSpeechRecognized;
-        Voice.onSpeechEnd = onSpeechEnd;
-        Voice.onSpeechError = onSpeechError;
-        Voice.onSpeechResults = onSpeechResults;
-        Voice.onSpeechPartialResults = onSpeechPartialResults;
-        console.log('✅ Voice recognition setup completed');
-      } else {
-        setVoiceAvailable(false);
-        console.warn(
-          '⚠️ Voice module not available - voice recognition disabled',
-        );
-      }
-    } catch (error) {
-      setVoiceAvailable(false);
-      console.warn('❌ Voice recognition setup failed:', error);
-    }
-
-    return () => {
-      try {
-        if (Voice.isModuleAvailable()) {
-          Voice.destroy()
-            .then(() => Voice.removeAllListeners())
-            .catch(console.warn);
-        }
-      } catch (error) {
-        console.warn('Voice cleanup failed:', error);
-      }
-      
-      // Clear debounce timer on cleanup
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-    };
-  }, []);
-
-  // Voice event handlers
-  const onSpeechStart = () => setIsListening(true);
-  const onSpeechRecognized = () => {};
-  const onSpeechEnd = () => {
-    console.log('🛑 Speech end detected');
-    setIsListening(false);
-    // Don't automatically stop recording - let user control it
-  };
-  const onSpeechError = (error: any) => {
-    console.log('❌ Voice error received:', error);
-    setIsListening(false);
-
-    // Show detailed error information
-    showVoiceErrorDialog(error);
-  };
-  const onSpeechResults = (event: any) => {
-    console.log('📝 Speech results received:', event.value);
-    setVoiceResults(event.value);
-    // Don't automatically stop - accumulate results for continuous speech
-  };
-  const onSpeechPartialResults = (event: any) => {
-    setVoiceResults(event.value);
-  };
-
-  // Permission handlers
-  const requestAudioPermission = async (): Promise<boolean> => {
-    if (Platform.OS === 'android') {
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          {
-            title: 'Audio Recording Permission',
-            message:
-              'This app needs access to your microphone to record audio messages.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
-        );
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
-      } catch (err) {
-        console.warn(err);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const showPermissionRequest = () => {
-    setShowPermissionDialog(true);
-  };
-
-  // Recording functions
-  const startRecording = async () => {
-    const hasPermission = await requestAudioPermission();
-    if (!hasPermission) {
-      showPermissionRequest();
-      return;
-    }
-
-    try {
-      const audioPath = `${RNFS.DocumentDirectoryPath}/audio_${Date.now()}.m4a`;
-
-      await audioRecorderPlayer.startRecorder(audioPath);
-
-      setRecording({
-        isRecording: true,
-        isPaused: false,
-        duration: 0,
-        audioPath,
-      });
-
-      // Start timer
-      recordingTimer.current = setInterval(() => {
-        setRecording(prev => ({ ...prev, duration: prev.duration + 1 }));
-      }, 1000);
-
-      // Start animations
-      recordingScale.value = withSpring(1.1, { damping: 10 });
-      recordingOpacity.value = withTiming(1, { duration: 200 });
-      pulseAnimation.value = withRepeat(
-        withTiming(1, { duration: 1000 }),
-        -1,
-        true,
-      );
-
-      // Start voice recognition
-      try {
-        if (Voice.isModuleAvailable()) {
-          console.log('🎤 Starting voice recognition...');
-          await Voice.start('en-US');
-          console.log('✅ Voice recognition started successfully');
-        } else {
-          console.warn(
-            '⚠️ Voice module not available - continuing with audio recording only',
-          );
-        }
-      } catch (voiceError: any) {
-        console.warn('❌ Voice recognition failed to start:', voiceError);
-        console.warn('Error details:', voiceError.message);
-        // Continue with recording even if voice recognition fails
-        showInfo('Voice recognition is not available, but audio recording will continue.');
-      }
-    } catch (error) {
-      console.error('Start recording error:', error);
-      showError('Failed to start recording. Please try again.');
-    }
-  };
-
-  const stopRecording = async () => {
-    try {
-      await audioRecorderPlayer.stopRecorder();
-
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-      }
-
-      // Stop voice recognition
-      try {
-        if (Voice.isModuleAvailable()) {
-          console.log('🛑 Stopping voice recognition...');
-          await Voice.stop();
-          console.log('✅ Voice recognition stopped successfully');
-        }
-      } catch (voiceError: any) {
-        console.warn('❌ Voice recognition failed to stop:', voiceError);
-        console.warn('Error details:', voiceError.message);
-      }
-
-      // Reset animations
-      recordingScale.value = withSpring(1);
-      recordingOpacity.value = withTiming(0);
-      pulseAnimation.value = withTiming(0);
-
-      // Get transcript
-      const rawTranscript = voiceResults.length > 0 ? voiceResults[0] : '';
-      console.log('📝 Raw transcript:', rawTranscript);
-
-      let finalTranscript = rawTranscript;
-
-      // Enhance transcript with OpenAI if available
-      if (rawTranscript.trim()) {
-        try {
-          console.log('🔄 Correcting transcription with OpenAI...');
-          finalTranscript =
-            await openAIService.correctTranscription(rawTranscript);
-          console.log('✅ Transcription corrected:', finalTranscript);
-        } catch (error) {
-          console.warn(
-            '⚠️ Transcription correction failed, using original:',
-            error,
-          );
-          finalTranscript = rawTranscript;
-        }
-      }
-
-      // Send recording with corrected transcript - support both callbacks
-      if (onSendRecording) {
-        onSendRecording(recording.audioPath, finalTranscript);
-      } else if (onSendVoiceMessage) {
-        onSendVoiceMessage(recording.audioPath, finalTranscript);
-      }
-
-      // Reset state
-      setRecording({
-        isRecording: false,
-        isPaused: false,
-        duration: 0,
-        audioPath: '',
-      });
-      setVoiceResults([]);
-    } catch (error) {
-      console.error('Stop recording error:', error);
-      showError('Failed to stop recording. Please try again.');
-    }
-  };
-
-  const cancelRecording = async () => {
-    try {
-      await audioRecorderPlayer.stopRecorder();
-      try {
-        await Voice.stop();
-      } catch (voiceError) {
-        console.warn('Voice stop failed during cancel:', voiceError);
-      }
-
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-      }
-
-      // Delete audio file
-      if (recording.audioPath && (await RNFS.exists(recording.audioPath))) {
-        await RNFS.unlink(recording.audioPath);
-      }
-
-      // Reset animations and state
-      recordingScale.value = withSpring(1);
-      recordingOpacity.value = withTiming(0);
-      pulseAnimation.value = withTiming(0);
-
-      // Completely reset recording state to restore mic icon
-      setRecording({
-        isRecording: false,
-        isPaused: false,
-        duration: 0,
-        audioPath: '', // This ensures the mic icon is shown again
-      });
-      setVoiceResults([]);
-      setIsListening(false);
-    } catch (error) {
-      console.error('Cancel recording error:', error);
-    }
-  };
-
-  const pauseRecording = async () => {
-    try {
-      await audioRecorderPlayer.pauseRecorder();
-      setRecording(prev => ({ ...prev, isPaused: true }));
-
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-      }
-
-      recordingScale.value = withSpring(1);
-      pulseAnimation.value = withTiming(0);
-    } catch (error) {
-      console.error('Pause recording error:', error);
-    }
-  };
-
-  const resumeRecording = async () => {
-    try {
-      await audioRecorderPlayer.resumeRecorder();
-      setRecording(prev => ({ ...prev, isPaused: false }));
-
-      // Restart timer
-      recordingTimer.current = setInterval(() => {
-        setRecording(prev => ({ ...prev, duration: prev.duration + 1 }));
-      }, 1000);
-
-      recordingScale.value = withSpring(1.1, { damping: 10 });
-      pulseAnimation.value = withRepeat(
-        withTiming(1, { duration: 1000 }),
-        -1,
-        true,
-      );
-    } catch (error) {
-      console.error('Resume recording error:', error);
-    }
-  };
-
   // File handling
   const handleFilePicker = async () => {
     try {
@@ -624,7 +457,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
 
   const handleImagePicker = async () => {
     const options = {
-      mediaTypes: MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3] as [number, number],
       quality: 0.8,
@@ -691,7 +523,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     }
   };
 
-
   const handleFocus = () => {
     // Remove animations to prevent flickering
   };
@@ -700,22 +531,13 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     // Remove animations to prevent flickering
   };
 
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-
-  const recordingAnimatedStyle = useAnimatedStyle(() => {
-    const pulseScale = interpolate(pulseAnimation.value, [0, 1], [1, 1.1]);
-
+  // Animation styles
+  const pulseAnimatedStyle = useAnimatedStyle(() => {
+    const scale = interpolate(pulseAnimation.value, [0, 1], [1, 1.2]);
     return {
-      transform: [{ scale: recordingScale.value * pulseScale }],
-      opacity: recordingOpacity.value,
+      transform: [{ scale }],
     };
   });
-
 
   if (disabled) {
     return (
@@ -778,6 +600,18 @@ export const PromptInput: React.FC<PromptInputProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         className="px-1 py-1"
       >
+        {/* Permission Message */}
+        {disabled && permissionMessage && (
+          <View className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-2">
+            <View className="flex-row items-center">
+              <MaterialIcon name="info" size={20} color="#F59E0B" />
+              <Text className="text-orange-700 text-sm ml-2 flex-1">
+                {permissionMessage}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Main Input Container */}
         <View className="relative">
         <LinearGradient
@@ -801,22 +635,16 @@ export const PromptInput: React.FC<PromptInputProps> = ({
             <TextInput
               ref={textInputRef}
               placeholder={
-                recording.isRecording
-                  ? `Recording ${formatDuration(recording.duration)}${recording.isPaused ? ' (Paused)' : ''}...`
+                isListening
+                  ? '🎤 Listening... Speak now'
                   : replyingTo
                   ? `Reply to ${replyingTo.sender}...`
                   : editingMessage
                   ? 'Edit message...'
                   : placeholder
               }
-              value={
-                recording.isRecording && voiceResults.length > 0
-                  ? voiceResults[0]
-                  : text
-              }
-              onChangeText={
-                recording.isRecording ? undefined : handleTextChange
-              }
+              value={text}
+              onChangeText={handleTextChange}
               onSelectionChange={event => {
                 setSelectionStart(event.nativeEvent.selection.start);
               }}
@@ -824,10 +652,10 @@ export const PromptInput: React.FC<PromptInputProps> = ({
               onBlur={handleBlur}
               className="text-gray-800 mb-3"
               placeholderTextColor={
-                recording.isRecording ? '#EF4444' : '#999999'
+                isListening ? '#3B82F6' : '#999999'
               }
               multiline={true}
-              editable={!recording.isRecording}
+              editable={!isListening}
               style={{
                 fontSize: 16,
                 fontWeight: '400',
@@ -836,92 +664,56 @@ export const PromptInput: React.FC<PromptInputProps> = ({
                 paddingHorizontal: 8,
                 maxHeight: 100,
                 minHeight: 40,
-                color: recording.isRecording ? '#EF4444' : '#374151',
+                color: '#374151',
               }}
             />
 
             {/* Bottom Action Buttons Row */}
             <View className="flex-row items-center justify-between">
               <View className="flex-row items-center space-x-4">
-                {/* Plus Button - Hidden during recording */}
-                {!recording.isRecording && (
-                  <TouchableOpacity
-                    onPress={() => setShowAttachmentModal(true)}
-                  >
-                    <Icon name="plus" size={20} color="#666666" />
-                  </TouchableOpacity>
-                )}
+                {/* Plus Button */}
+                <TouchableOpacity
+                  onPress={() => setShowAttachmentModal(true)}
+                >
+                  <Icon name="plus" size={20} color="#666666" />
+                </TouchableOpacity>
 
-                {/* Emoji Button - Hidden during recording */}
-                {!recording.isRecording && (
-                  <TouchableOpacity onPress={() => setShowEmojiPicker(true)}>
-                    <Text className="text-xl">😊</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* Recording Controls - Show during recording */}
-                {recording.isRecording && (
-                  <View className="flex-row items-center space-x-4">
-                    {/* Delete/Cancel Button */}
-                    <TouchableOpacity
-                      onPress={cancelRecording}
-                      className="w-8 h-8 bg-red-100 rounded-full items-center justify-center"
-                    >
-                      <MaterialIcon name="delete" size={16} color="#EF4444" />
-                    </TouchableOpacity>
-
-                    {/* Pause/Resume Button */}
-                    <TouchableOpacity
-                      onPress={
-                        recording.isPaused ? resumeRecording : pauseRecording
-                      }
-                      className="w-8 h-8 bg-orange-100 rounded-full items-center justify-center"
-                    >
-                      <MaterialIcon
-                        name={recording.isPaused ? 'play-arrow' : 'pause'}
-                        size={16}
-                        color="#F97316"
-                      />
-                    </TouchableOpacity>
-
-                    {/* Recording indicator */}
-                    <View className="flex-row items-center">
-                      <Animated.View
-                        style={recordingAnimatedStyle}
-                        className="w-2 h-2 bg-red-500 rounded-full mr-2"
-                      />
-                      <Text className="text-red-500 text-xs font-medium">
-                        {formatDuration(recording.duration)}
-                      </Text>
-                    </View>
-                  </View>
-                )}
+                {/* Emoji Button */}
+                <TouchableOpacity onPress={() => setShowEmojiPicker(true)}>
+                  <Text className="text-xl">😊</Text>
+                </TouchableOpacity>
               </View>
 
               <View className="flex-row items-center space-x-4">
-                {/* Sound/Record Button - Hidden during recording */}
-                {!recording.isRecording && (
-                  <TouchableOpacity onPress={() => console.log('Sound/Record')}>
-                    <MaterialIcon name="graphic-eq" size={24} color="#666666" />
-                  </TouchableOpacity>
-                )}
+                {/* Microphone Button */}
+                <TouchableOpacity 
+                  onPress={isListening ? stopListening : startListening}
+                  className="items-center"
+                >
+                  {isListening ? (
+                    <Animated.View style={pulseAnimatedStyle}>
+                      <View className="flex-row items-center justify-center">
+                        <View className="w-2 h-2 bg-blue-500 rounded-full mx-1" />
+                        <View className="w-2 h-2 bg-blue-500 rounded-full mx-1" />
+                        <View className="w-2 h-2 bg-blue-500 rounded-full mx-1" />
+                      </View>
+                    </Animated.View>
+                  ) : (
+                    <MaterialIcon name="mic" size={24} color="#666666" />
+                  )}
+                  <Text className="text-xs text-gray-500 mt-1">
+                    {isListening ? 'Listening...' : 'Voice'}
+                  </Text>
+                </TouchableOpacity>
 
-                {/* Microphone/Send Button - Always rightmost */}
-                {recording.isRecording ? (
-                  <TouchableOpacity onPress={stopRecording}>
-                    <MaterialIcon name="send" size={24} color="#4285F4" />
-                  </TouchableOpacity>
-                ) : text.trim() ? (
+                {/* Send Button */}
+                {text.trim() && (
                   <TouchableOpacity onPress={handleSend} disabled={isLoading}>
                     {isLoading ? (
                       <ActivityIndicator size="small" color="#4285F4" />
                     ) : (
                       <MaterialIcon name="send" size={24} color="#4285F4" />
                     )}
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity onPress={startRecording}>
-                    <MaterialIcon name="mic" size={24} color="#666666" />
                   </TouchableOpacity>
                 )}
               </View>
@@ -1016,31 +808,12 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       )}
 
       {/* Voice Recognition Status */}
-      {isListening && !recording.isRecording && (
+      {isListening && (
         <View className="mt-2 px-4 flex-row items-center justify-center">
           <MaterialIcon name="mic" size={16} color="#3B82F6" />
-          <Text className="text-blue-600 text-sm ml-2">Listening...</Text>
+          <Text className="text-blue-600 text-sm ml-2">Listening for speech...</Text>
         </View>
       )}
-
-        {/* Voice Debug Info */}
-        {__DEV__ && (
-          <View className="mt-2 px-4">
-            <Text className="text-xs text-gray-500 text-center">
-              Voice Module: {voiceAvailable ? '✅ Available' : '❌ Not Available'}
-            </Text>
-            {voiceResults.length > 0 && (
-              <Text className="text-xs text-blue-600 text-center mt-1">
-                Last: {voiceResults[0]}
-              </Text>
-            )}
-            {showMentionSuggestions && (
-              <Text className="text-xs text-green-600 text-center mt-1">
-                Mention suggestions: {filteredMentionUsers.length} users found for "{mentionQuery}"
-              </Text>
-            )}
-          </View>
-        )}
       </KeyboardAvoidingView>
 
       {/* Mention Suggestions - Outside KeyboardAvoidingView for better positioning */}
@@ -1072,31 +845,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
           </ScrollView>
         </View>
       )}
-
-      {/* Permission Dialog */}
-      <PermissionDialog
-        visible={showPermissionDialog}
-        title="Microphone Permission"
-        message="Allow access to your microphone to record voice messages with transcription."
-        permissionType="microphone"
-        onAllow={async () => {
-          const hasPermission = await requestAudioPermission();
-          if (hasPermission) {
-            showSuccess('Microphone permission granted!');
-            // Auto-start recording if permission was just granted
-            setTimeout(() => startRecording(), 300);
-          } else {
-            showError('Microphone permission denied. You can enable it in Settings.');
-          }
-        }}
-        onDeny={() => {
-          showInfo('Voice recording requires microphone permission.');
-        }}
-        onClose={() => setShowPermissionDialog(false)}
-      />
-
-      {/* Action Dialog */}
-      <ActionDialog {...dialogProps} onClose={hideDialog} />
     </View>
   );
 };

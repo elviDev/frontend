@@ -1,51 +1,13 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { Announcement, CreateAnnouncementData, UpdateAnnouncementData, AnnouncementFilter } from '../../types/announcement.types';
-import { SEED_ANNOUNCEMENTS } from '../../data/seedData';
+import { announcementService } from '../../services/api/announcementService';
 
-// Mock API service - replace with actual API calls
-const mockAnnouncementService = {
-  async getAnnouncements(filters?: AnnouncementFilter): Promise<{ data: Announcement[]; total: number }> {
-    // Mock implementation - replace with actual API call
-    return { data: SEED_ANNOUNCEMENTS, total: SEED_ANNOUNCEMENTS.length };
-  },
-
-  async createAnnouncement(data: CreateAnnouncementData): Promise<Announcement> {
-    // Mock implementation - replace with actual API call
-    const newAnnouncement: Announcement = {
-      id: `announce-${Date.now()}`,
-      ...data,
-      published: data.published ?? false,
-      createdBy: 'current-user-id',
-      createdAt: new Date(),
-      readBy: []
-    };
-    return newAnnouncement;
-  },
-
-  async updateAnnouncement(id: string, data: UpdateAnnouncementData): Promise<Announcement> {
-    // Mock implementation - replace with actual API call
-    const existing = SEED_ANNOUNCEMENTS.find(a => a.id === id);
-    if (!existing) throw new Error('Announcement not found');
-    
-    return { ...existing, ...data, updatedAt: new Date() };
-  },
-
-  async deleteAnnouncement(id: string): Promise<void> {
-    // Mock implementation - replace with actual API call
-    console.log('Deleting announcement:', id);
-  },
-
-  async markAsRead(id: string, userId: string): Promise<void> {
-    // Mock implementation - replace with actual API call
-    console.log('Marking announcement as read:', id, userId);
-  }
-};
 
 // Async thunks
 export const fetchAnnouncements = createAsyncThunk(
   'announcements/fetchAnnouncements',
   async (filters?: AnnouncementFilter) => {
-    const response = await mockAnnouncementService.getAnnouncements(filters);
+    const response = await announcementService.getAnnouncements(filters);
     return response;
   }
 );
@@ -53,7 +15,7 @@ export const fetchAnnouncements = createAsyncThunk(
 export const createAnnouncement = createAsyncThunk(
   'announcements/createAnnouncement',
   async (data: CreateAnnouncementData) => {
-    const response = await mockAnnouncementService.createAnnouncement(data);
+    const response = await announcementService.createAnnouncement(data);
     return response;
   }
 );
@@ -61,7 +23,7 @@ export const createAnnouncement = createAsyncThunk(
 export const updateAnnouncement = createAsyncThunk(
   'announcements/updateAnnouncement',
   async ({ id, data }: { id: string; data: UpdateAnnouncementData }) => {
-    const response = await mockAnnouncementService.updateAnnouncement(id, data);
+    const response = await announcementService.updateAnnouncement(id, data);
     return response;
   }
 );
@@ -69,7 +31,7 @@ export const updateAnnouncement = createAsyncThunk(
 export const deleteAnnouncement = createAsyncThunk(
   'announcements/deleteAnnouncement',
   async (id: string) => {
-    await mockAnnouncementService.deleteAnnouncement(id);
+    await announcementService.deleteAnnouncement(id);
     return id;
   }
 );
@@ -77,7 +39,7 @@ export const deleteAnnouncement = createAsyncThunk(
 export const markAnnouncementAsRead = createAsyncThunk(
   'announcements/markAsRead',
   async ({ id, userId }: { id: string; userId: string }) => {
-    await mockAnnouncementService.markAsRead(id, userId);
+    await announcementService.markAsRead(id, userId);
     return { id, userId };
   }
 );

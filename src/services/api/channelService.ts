@@ -136,6 +136,11 @@ class ChannelService {
   
   // Request deduplication cache to prevent identical concurrent requests
   private pendingRequests: Map<string, Promise<any>> = new Map();
+  
+  // Clear pending requests cache (useful for cleanup or error recovery)
+  public clearPendingRequests(): void {
+    this.pendingRequests.clear();
+  }
 
   private async getAuthToken(): Promise<string | null> {
     try {
@@ -211,7 +216,8 @@ class ChannelService {
   ): Promise<T> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      // Reduce timeout to 15 seconds for better mobile experience
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(`${baseUrl}/${endpoint}`, {
         ...options,
@@ -283,6 +289,12 @@ class ChannelService {
       });
       
       if (error.name === 'AbortError') {
+        // Retry timeout errors once if this is the first attempt
+        if (retryCount === 0) {
+          console.log(`ChannelService: Retrying timed out request to ${endpoint}...`);
+          return this.makeRequest(endpoint, options, 1);
+        }
+        
         throw new AuthError(
           'Request timed out. Please check your connection and try again.',
           'TIMEOUT',

@@ -3,9 +3,12 @@
  * This file contains all the API endpoints and configuration
  */
 
+import { OPENAI_API_KEY } from "@env";
+
 const API_CONFIG = {
   BASE_URL: 'https://backend-sy9q.onrender.com/api/v1',
   WS_URL: 'https://backend-sy9q.onrender.com',
+  OPENAI_API_KEY: OPENAI_API_KEY,
   
   // Development URLs
   // For Android emulator, use 10.0.2.2 instead of localhost
@@ -14,11 +17,14 @@ const API_CONFIG = {
   DEV_WS_URL: 'http://10.0.2.2:3000',
 };
 
-// Production environment (fallback when dev server is not available)
-export const API_BASE_URL = API_CONFIG.BASE_URL;
-export const WS_BASE_URL = API_CONFIG.WS_URL;
+// Production environment (for release builds)
+// export const API_BASE_URL = API_CONFIG.BASE_URL;
+// export const WS_BASE_URL = API_CONFIG.WS_URL;
 
-// Development environment (dev server not running)
+// Development environment (uncomment for local testing)
 // export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
 // export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
+
+export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
+export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
 export default API_CONFIG

@@ -1,6 +1,6 @@
 // Alternative configuration approach
 export const CONFIG = {
-  OPENAI_API_KEY: '', // Remove hardcoded key for security - use environment variables
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   // Add other API keys here as needed
 };
 

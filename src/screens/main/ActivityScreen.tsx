@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -13,7 +12,7 @@ import { RootState } from '../../store/store';
 import { useWebSocket } from '../../services/websocketService';
 import { activityService, Activity } from '../../services/api/activityService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { useAppTranslation } from '../../hooks/useAppTranslation';
+import { useBackendTranslation } from '../../hooks/useBackendTranslation';
 
 interface ActivityItem {
   id: string;
@@ -33,10 +32,10 @@ interface ActivityItem {
 }
 
 export const ActivityScreen: React.FC = () => {
-  const { t, navigation: nav } = useAppTranslation();
+  const { translateActivityType, translateTaskPriority } = useBackendTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { on, off, joinChannel, leaveChannel } = useWebSocket();
+  const { on, off } = useWebSocket();
   
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,7 +43,6 @@ export const ActivityScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'tasks' | 'announcements' | 'system'>('all');
   const [unreadCount, setUnreadCount] = useState(0);
-  const fadeAnim = new Animated.Value(0);
 
   // Initialize and fetch data
   useEffect(() => {
@@ -58,7 +56,7 @@ export const ActivityScreen: React.FC = () => {
 
 
 
-  const loadActivities = async () => {
+  const loadActivities = useCallback(async () => {
     try {
       setLoading(true);
       console.log('ActivityScreen: Loading activities from backend API...', {
@@ -100,14 +98,15 @@ export const ActivityScreen: React.FC = () => {
 
         setActivities(transformedActivities);
         setError(null); // Clear any previous errors
-        console.log('ActivityScreen: Activities loaded successfully', { 
-          count: transformedActivities.length,
-          unreadCount: transformedActivities.filter(a => !a.read).length
-        });
-
-        // Update unread count
+        
+        // Calculate and update unread count in one go
         const unreadItems = transformedActivities.filter(a => !a.read);
         setUnreadCount(unreadItems.length);
+        
+        console.log('ActivityScreen: Activities loaded successfully', { 
+          count: transformedActivities.length,
+          unreadCount: unreadItems.length
+        });
       } else {
         // Backend returned successful response but no data - this is normal for empty database
         console.log('ActivityScreen: No activities found in database');
@@ -127,7 +126,7 @@ export const ActivityScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []); // No dependencies to prevent re-creating the function
 
   const setupWebSocketListeners = () => {
     // Listen for real-time notifications
@@ -222,20 +221,20 @@ export const ActivityScreen: React.FC = () => {
     }
   };
 
-  const addActivityItem = (item: ActivityItem) => {
+  const addActivityItem = useCallback((item: ActivityItem) => {
     setActivities(prev => {
       const filtered = prev.filter(a => a.id !== item.id);
       const newActivities = [item, ...filtered].slice(0, 100);
       
-      // Update unread count
+      // Update unread count in the same state update to prevent extra renders
       const unreadItems = newActivities.filter(a => !a.read);
       setUnreadCount(unreadItems.length);
       
       return newActivities;
     });
-  };
+  }, []);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       setError(null); // Clear any previous errors when refreshing
@@ -243,9 +242,9 @@ export const ActivityScreen: React.FC = () => {
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [loadActivities]);
 
-  const markAsRead = (activityId: string) => {
+  const markAsRead = useCallback((activityId: string) => {
     setActivities(prev => 
       prev.map(activity => 
         activity.id === activityId 
@@ -255,24 +254,26 @@ export const ActivityScreen: React.FC = () => {
     );
     
     setUnreadCount(prev => Math.max(0, prev - 1));
-  };
+  }, []);
 
-  const markAllAsRead = () => {
+  const markAllAsRead = useCallback(() => {
     setActivities(prev => 
       prev.map(activity => ({ ...activity, read: true }))
     );
     setUnreadCount(0);
-  };
+  }, []);
 
-  const filteredActivities = activities.filter(activity => {
-    if (filter === 'all') return true;
-    if (filter === 'tasks') return activity.type.startsWith('task_');
-    if (filter === 'announcements') return activity.type === 'announcement';
-    if (filter === 'system') return ['channel_created', 'user_joined', 'file_uploaded', 'message_sent'].includes(activity.type);
-    return true;
-  });
+  const filteredActivities = useMemo(() => {
+    return activities.filter(activity => {
+      if (filter === 'all') return true;
+      if (filter === 'tasks') return activity.type.startsWith('task_');
+      if (filter === 'announcements') return activity.type === 'announcement';
+      if (filter === 'system') return ['channel_created', 'user_joined', 'file_uploaded', 'message_sent'].includes(activity.type);
+      return true;
+    });
+  }, [activities, filter]);
 
-  const formatTimestamp = (timestamp: Date) => {
+  const formatTimestamp = useCallback((timestamp: Date) => {
     const now = new Date();
     const diff = now.getTime() - timestamp.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -284,9 +285,9 @@ export const ActivityScreen: React.FC = () => {
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
     return timestamp.toLocaleDateString();
-  };
+  }, []);
 
-  const getPriorityColor = (priority: string) => {
+  const getPriorityColor = useCallback((priority: string) => {
     switch (priority) {
       case 'critical': return 'text-red-600';
       case 'high': return 'text-orange-600';
@@ -294,9 +295,9 @@ export const ActivityScreen: React.FC = () => {
       case 'medium': return 'text-blue-600';
       default: return 'text-gray-600';
     }
-  };
+  }, []);
 
-  const getActivityIcon = (type: string) => {
+  const getActivityIcon = useCallback((type: string) => {
     switch (type) {
       case 'task_created': return '➕';
       case 'task_completed': return '✅';
@@ -310,9 +311,9 @@ export const ActivityScreen: React.FC = () => {
       case 'message_sent': return '💬';
       default: return '📋';
     }
-  };
+  }, []);
 
-  console.log("ACTIVITIES:", filteredActivities)
+  // Removed console.log to improve performance
 
   const renderActivityItem = ({ item }: { item: ActivityItem }) => (
     <TouchableOpacity
@@ -327,13 +328,13 @@ export const ActivityScreen: React.FC = () => {
         <View className="flex-row items-start flex-1">
           <Text className="text-2xl mr-3 mt-0.5">{getActivityIcon(item.type)}</Text>
           <View className="flex-1">
-            <Text className="text-gray-900 font-semibold text-base mb-1">{item.title}</Text>
+            <Text className="text-gray-900 font-semibold text-base mb-1">{translateActivityType(item.type) || item.title}</Text>
             <Text className="text-gray-600 text-sm mb-2 leading-5">{item.description}</Text>
             <View className="flex-row items-center justify-between">
               <Text className="text-gray-400 text-xs">{formatTimestamp(item.timestamp)}</Text>
               {item.priority && (
                 <Text className={`text-xs font-medium ${getPriorityColor(item.priority)} capitalize`}>
-                  {item.priority}
+                  {translateTaskPriority(item.priority)}
                 </Text>
               )}
             </View>
@@ -355,7 +356,7 @@ export const ActivityScreen: React.FC = () => {
   }
 
   return (
-    <Animated.View 
+    <View 
       className="flex-1 bg-gray-50" 
       style={{ paddingTop: insets.top }}
     >
@@ -447,6 +448,6 @@ export const ActivityScreen: React.FC = () => {
           filteredActivities.map((item) => renderActivityItem({ item }))
         )}
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 };

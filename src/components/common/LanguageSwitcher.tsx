@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Colors } from '../../utils/colors';
+import { saveLanguagePreference } from '../../i18n';
 
 interface LanguageSwitcherProps {
   style?: any;
@@ -10,8 +11,14 @@ interface LanguageSwitcherProps {
 export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ style }) => {
   const { i18n, t } = useTranslation();
 
-  const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(lng);
+  const changeLanguage = async (lng: string) => {
+    try {
+      await i18n.changeLanguage(lng);
+      await saveLanguagePreference(lng);
+      console.log(`Language changed to: ${lng}`);
+    } catch (error) {
+      console.error('Failed to change language:', error);
+    }
   };
 
   const currentLanguage = i18n.language;

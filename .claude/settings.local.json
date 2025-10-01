@@ -16,7 +16,15 @@
       "Bash(npx react-native start:*)",
       "Bash(pkill:*)",
       "Bash(node:*)",
-      "Bash(npx react-native:*)"
+      "Bash(npx react-native:*)",
+      "Bash(ipconfig:*)",
+      "Bash(lsof:*)",
+      "Bash(sudo pfctl:*)",
+      "Bash(npm install)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

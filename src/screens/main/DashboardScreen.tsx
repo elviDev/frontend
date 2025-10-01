@@ -92,9 +92,9 @@ const DashboardScreen = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View className="flex-1 justify-center items-center px-6">
-        <View style={{ marginBottom: 64 }}>
+        <View style={{ marginBottom: 44 }}>
           <MaskedView
-            style={{ height: 80, width: 350 }}
+            style={{ height: 160, width: 350 }}
             maskElement={
               <View
                 style={{

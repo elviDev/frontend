@@ -65,15 +65,17 @@ export const Message: React.FC<MessageProps> = ({
         </View>
       </View>
     );
-  }``
-
+  }
+  
+  // console.log('💬 Message: Rendering message:', message.id, message);
   // Handle missing user_details gracefully
   const userDetails = {
     id: message.user_id,
-    name: message.user_name || 'Unknown User',
-    avatar_url: message.user_avatar || undefined,
+    name: message?.user_name || 'Unknown User',
+    avatar_url:
+      message?.user_avatar || undefined,
     role: message.user_role || undefined,
-  }
+  };
   const isOwnMessage = userDetails?.id === currentUserId;
   const canEdit = isOwnMessage && !message.deleted_at;
   const canDelete = isOwnMessage && !message.deleted_at;
@@ -83,24 +85,13 @@ export const Message: React.FC<MessageProps> = ({
     if (!timestamp) {
       return 'Invalid time';
     }
-
+    
     try {
       const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-
-      // More comprehensive date validation
-      if (isNaN(date.getTime()) || date.getTime() < 0) {
+      if (isNaN(date.getTime())) {
         return 'Invalid time';
       }
-
-      // Additional validation for reasonable date ranges
-      const now = new Date();
-      const hundredYearsAgo = new Date(now.getFullYear() - 100, 0, 1);
-      const hundredYearsFromNow = new Date(now.getFullYear() + 100, 0, 1);
-
-      if (date < hundredYearsAgo || date > hundredYearsFromNow) {
-        return 'Invalid time';
-      }
-
+      
       if (isToday(date)) {
         return format(date, 'HH:mm');
       } else if (isYesterday(date)) {
@@ -204,20 +195,7 @@ export const Message: React.FC<MessageProps> = ({
             </View>
           )}
 
-          {/* Reply Reference */}
-          {message.reply_to && (
-            <View className="mb-2 pl-3 border-l-2 border-gray-300 bg-gray-50 rounded-r-lg p-2">
-              <Text className="text-gray-600 text-xs font-medium">
-                Replying to {message.reply_to.user_details?.name || message.reply_to.sender?.name || 'Someone'}
-              </Text>
-              <Text 
-                className="text-gray-700 text-sm mt-0.5" 
-                numberOfLines={2}
-              >
-                {message.reply_to.content}
-              </Text>
-            </View>
-          )}
+      
 
           {/* Message Text */}
           <View className="mb-1">
@@ -333,9 +311,10 @@ export const Message: React.FC<MessageProps> = ({
         onClose={() => setShowEmojiPicker(false)}
         onEmojiSelect={(emoji) => {
           try {
+            console.log('💬 Message: Emoji selected for message:', message.id, emoji);
             onReaction?.(message.id, emoji);
           } catch (error) {
-            console.error('Error calling onReaction:', error);
+            console.error('🚨 Message: Error calling onReaction:', error);
           }
         }}
       />

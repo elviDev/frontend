@@ -5,6 +5,9 @@ import { RootState } from '../store/store';
 import type { Message, TypingUser, MessagesResponse } from '../types/message';
 import { messageService } from '../services/messageService';
 import { webSocketService } from '../services/websocketService';
+import { channelService } from '../services/api/channelService';
+import { canSendMessage, getMessageSendDeniedReason } from '../utils/channelPermissions';
+import type { Channel } from '../services/api/channelService';
 
 interface SendMessageParams {
   content: string;
@@ -65,6 +68,7 @@ export const useMessages = (channelId: string) => {
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
 
   // Production-grade state management
   const [editingMessages, setEditingMessages] = useState<Set<string>>(
@@ -293,6 +297,19 @@ export const useMessages = (channelId: string) => {
   // Store loadMessages in ref for stable reference in useEffect
   loadMessagesRef.current = loadMessages;
 
+  // Load channel information for permission checking
+  const loadChannel = useCallback(async () => {
+    try {
+      const channel = await channelService.getChannel(channelId);
+      if (isMountedRef.current) {
+        setCurrentChannel(channel);
+      }
+    } catch (error) {
+      console.error('Failed to load channel info for permissions:', error);
+      // Don't show error to user as this is for permission checking
+    }
+  }, [channelId]);
+
   // Enhanced load more with intelligent pagination and caching
   const loadMoreMessages = useCallback(async () => {
     if (isLoadingMore || !hasMoreMessages || !pagination.hasMore) {
@@ -409,6 +426,13 @@ export const useMessages = (channelId: string) => {
       retryCount = 0,
     ): Promise<Message | undefined> => {
       try {
+        // Check permissions before sending
+        if (!canSendMessage(currentChannel, currentUser)) {
+          const reason = getMessageSendDeniedReason(currentChannel, currentUser);
+          showError(reason || 'You do not have permission to send messages in this channel');
+          throw new Error(reason || 'Permission denied');
+        }
+
         // Send message directly without optimistic updates
         const response = await messageService.sendMessage(channelId, {
           content: params.content,
@@ -426,7 +450,17 @@ export const useMessages = (channelId: string) => {
         });
 
         if (response.success) {
+          console.log('✅ Message sent to server successfully. Waiting for WebSocket confirmation:', {
+            messageId: response.data?.id,
+            content: response.data?.content,
+            hasCompleteData: !!(response.data?.reply_to),
+            replyToId: response.data?.reply_to_id
+          });
+          
+          // Show success but don't update UI - let WebSocket handle that
           showSuccess('Message sent!');
+          
+          // Return the API response but UI will update only via WebSocket
           return response.data as Message;
         } else {
           throw new Error(
@@ -458,7 +492,7 @@ export const useMessages = (channelId: string) => {
         throw err;
       }
     },
-    [showSuccess, showError, channelId],
+    [showSuccess, showError, channelId, currentChannel, currentUser],
   );
 
   const editMessage = useCallback(
@@ -479,20 +513,6 @@ export const useMessages = (channelId: string) => {
 
       // Mark as being edited
       setEditingMessages(prev => new Set([...Array.from(prev), messageId]));
-
-      // Optimistically update with loading state
-      const optimisticMessage = {
-        ...originalMessage,
-        content,
-        isEdited: true,
-        editedAt: new Date(),
-        isBeingEdited: true,
-      };
-
-      updateMessages(prev =>
-        prev.map(msg => (msg.id === messageId ? optimisticMessage : msg)),
-      );
-
       try {
         const response = await messageService.editMessage(
           channelId,
@@ -507,6 +527,13 @@ export const useMessages = (channelId: string) => {
             ...updatedMessage,
             isBeingEdited: false,
           };
+
+          console.log('🔄 Edit response received:', {
+            messageId: updatedMessage.id,
+            hasReplyTo: !!updatedMessage.reply_to,
+            replyToId: updatedMessage.reply_to_id,
+            content: updatedMessage.content
+          });
 
           updateMessages(prev =>
             prev.map(msg => (msg.id === messageId ? finalMessage : msg)),
@@ -868,33 +895,79 @@ export const useMessages = (channelId: string) => {
         currentChannelId: channelId,
         messageId: data.message?.id || data.data?.id,
         messageContent: data.message?.content || data.data?.content,
-        fullData: data,
+        messageReplyToId: data.message?.reply_to_id || data.data?.reply_to_id,
+        messageHasReplyTo: !!(data.message?.reply_to || data.data?.reply_to),
+        replyToObject: data.message?.reply_to || data.data?.reply_to,
+        dataStructure: {
+          hasMessage: !!data.message,
+          hasData: !!data.data,
+          dataHasMessage: !!((data as any).data?.message),
+        },
+        fullWebSocketData: data,
       });
+      
+      // Log the complete message object that will be used
+      const messageForUI = (data as any).data?.message || data.message || data.data;
+      if (messageForUI) {
+        console.log('📨 Complete message data from WebSocket:', {
+          id: messageForUI.id,
+          content: messageForUI.content,
+          reply_to_id: messageForUI.reply_to_id,
+          has_reply_to_object: !!messageForUI.reply_to,
+          reply_to_content: messageForUI.reply_to?.content,
+          reply_to_user: messageForUI.reply_to?.user_name,
+          user_name: messageForUI.user_name,
+          created_at: messageForUI.created_at
+        });
+      }
 
       // Handle both channelId and channel_id formats
       const eventChannelId = data.channelId || data.channel_id;
 
       if (eventChannelId === channelId) {
         // Validate that message data exists - handle different data structures
-        let messageData = data.data?.message || data.message;
+        let messageData = (data as any).data?.message || data.message || data.data;
         if (!messageData) {
+          console.log('❌ No message data found in WebSocket event');
           return;
         }
 
         try {
-          // New message in current channel - check for duplicates before adding
-          const newMessage = messageData as Message;
+          // This is the ONLY place messages should be added to UI
+          const completeMessage = messageData as Message;
+          
+          console.log('🎯 Processing WebSocket message for UI update:', {
+            messageId: completeMessage.id,
+            content: completeMessage.content?.substring(0, 50),
+            isReply: !!completeMessage.reply_to_id,
+            hasCompleteReplyData: !!completeMessage.reply_to,
+            replyToId: completeMessage.reply_to_id,
+            replyToContent: completeMessage.reply_to?.content?.substring(0, 30)
+          });
+          
           updateMessages(prev => {
-            // Check if message already exists
-            const messageExists = prev.some(msg => msg.id === newMessage.id);
-            if (messageExists) {
-              console.log(
-                'Duplicate message detected, skipping:',
-                newMessage.id,
-              );
-              return prev;
+            // Check if message already exists (shouldn't happen with WebSocket-only approach)
+            const existingMessageIndex = prev.findIndex(msg => msg.id === completeMessage.id);
+            if (existingMessageIndex !== -1) {
+              console.log('⚠️ Message already exists, replacing with WebSocket data:', {
+                messageId: completeMessage.id,
+                hadReplyTo: !!prev[existingMessageIndex].reply_to,
+                nowHasReplyTo: !!completeMessage.reply_to
+              });
+              
+              const updated = [...prev];
+              updated[existingMessageIndex] = completeMessage;
+              return updated;
             }
-            return [...prev, newMessage];
+            
+            console.log('✅ Adding new message from WebSocket (this is the source of truth):', {
+              messageId: completeMessage.id,
+              hasReplyTo: !!completeMessage.reply_to,
+              replyToId: completeMessage.reply_to_id,
+              userWillSeeCompleteData: true
+            });
+            
+            return [...prev, completeMessage];
           });
         } catch (error) {
           console.error('Error processing message_sent event:', error);
@@ -1139,6 +1212,7 @@ export const useMessages = (channelId: string) => {
       setMessageIds(new Set());
       setError(null);
       setHasMoreMessages(true);
+      setCurrentChannel(null);
 
       // Reset pagination state
       setPagination({
@@ -1150,10 +1224,11 @@ export const useMessages = (channelId: string) => {
         isInitialLoad: true,
       });
 
-      // Use the ref to avoid dependency issues
+      // Load messages and channel info
       loadMessagesRef.current();
+      loadChannel();
     }
-  }, [channelId]);
+  }, [channelId, loadChannel]);
 
   // Enhanced cleanup for typing indicators with stale user removal
   useEffect(() => {
@@ -1249,5 +1324,8 @@ export const useMessages = (channelId: string) => {
     // Message state getters
     editingMessages,
     deletingMessages,
+    // Permission state
+    canSendMessage: canSendMessage(currentChannel, currentUser),
+    currentChannel,
   };
 };

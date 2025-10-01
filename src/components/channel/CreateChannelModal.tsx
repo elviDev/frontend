@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, TextInput, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import IonIcon from 'react-native-vector-icons/Ionicons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
@@ -42,6 +42,7 @@ interface CreateChannelModalProps {
   formErrors: FormErrors;
   availableMembers: Member[];
   tagInput: string;
+  submitting?: boolean;
   onFormDataChange: (data: Partial<FormData>) => void;
   onFormErrorsChange: (errors: Partial<FormErrors>) => void;
   onTagInputChange: (text: string) => void;
@@ -60,6 +61,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   formErrors,
   availableMembers,
   tagInput,
+  submitting = false,
   onFormDataChange,
   onFormErrorsChange,
   onTagInputChange,
@@ -464,11 +466,20 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               <Text className="text-gray-700 font-medium text-center">Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={onSubmit}
-              className="flex-1 bg-purple-600 rounded-xl py-4"
+              onPress={submitting ? undefined : onSubmit}
+              disabled={submitting}
+              className={`flex-1 rounded-xl py-4 flex-row items-center justify-center ${
+                submitting ? 'bg-purple-400' : 'bg-purple-600'
+              }`}
             >
+              {submitting && (
+                <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+              )}
               <Text className="text-white font-medium text-center">
-                {isEditMode ? 'Update Channel' : 'Create Channel'}
+                {submitting 
+                  ? (isEditMode ? 'Updating...' : 'Creating...') 
+                  : (isEditMode ? 'Update Channel' : 'Create Channel')
+                }
               </Text>
             </TouchableOpacity>
           </View>

@@ -41,6 +41,7 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
 
   // Use custom hooks for state management
   const [channelState, channelActions] = useChannelState(channelId);
+  console.log("Channel State:", channelState)
   const {
     messages,
     isLoading,
@@ -55,7 +56,10 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     loadMoreMessages,
     startTyping,
     stopTyping,
+    canSendMessage: userCanSendMessage,
+    currentChannel,
   } = useMessages(channelId);
+  console.log("Messages:", messages[0]);
   
   const {
     // Channel state
@@ -73,21 +77,28 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     generateSummary,
   } = channelActions;
 
-
   // Enhanced members for UI consistency - use actual channel members if available
-  const enhancedMembers = (actualChannelMembers.length > 0 ? actualChannelMembers : members || []).map((member, index) => ({
+  const enhancedMembers = (
+    actualChannelMembers.length > 0 ? actualChannelMembers : members || []
+  ).map((member, index) => ({
     id: member?.id || member?.user_id || `member_${index}`,
     name: member?.name || member?.user_name || `User ${index + 1}`,
-    username: member?.username || member?.user_name || member?.name || `user${index + 1}`,
+    username:
+      member?.username ||
+      member?.user_name ||
+      member?.name ||
+      `user${index + 1}`,
     role: member?.role || 'Member',
-    avatar: member?.avatar || member?.user_avatar || member?.name?.charAt(0) || member?.user_name?.charAt(0) || undefined,
+    avatar:
+      member?.avatar ||
+      member?.avatar_url || member?.name.split(' ')[0]?.charAt(0).toUpperCase() + member?.name.split(' ')[1]?.charAt(0).toUpperCase(),
     isOnline: member?.isOnline || true,
   }));
 
   // Message handlers
   const handleSendMessage = async (content: string, attachments?: any[]) => {
     try {
-      await sendMessage({
+      const sentMessage = await sendMessage({
         content,
         type: 'text',
         replyTo: replyingTo ? {
@@ -97,6 +108,14 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         } : undefined,
         attachments,
       });
+      
+      console.log('✅ Message sent successfully:', {
+        messageId: sentMessage?.id,
+        hasReplyTo: !!sentMessage?.reply_to,
+        replyToId: sentMessage?.reply_to_id,
+        isReply: !!replyingTo
+      });
+      
       setReplyingTo(null);
     } catch (err: any) {
       console.error('Failed to send message:', err);
@@ -135,16 +154,17 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
   };
 
 
-  const handleGenerateSummary = () => {
-    generateSummary();
-  };
+  // const handleGenerateSummary = () => {
+  //   generateSummary();
+  // };
 
-  const handleCreateTasks = () => {
-    setShowTaskIntegration(true);
-  };
+  // const handleCreateTasks = () => {
+  //   setShowTaskIntegration(true);
+  // };
 
   const handleUserPress = (userId: string) => {
-    showInfo(`Navigate to user: ${userId}`);
+    // Navigate to user profile screen
+    navigation.navigate('UserProfile', { userId });
   };
 
 
@@ -173,13 +193,13 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         />
 
         {/* AI Actions */}
-        <AIActions
+        {/* <AIActions
           onGenerateSummary={handleGenerateSummary}
           onCreateTasks={handleCreateTasks}
           isGeneratingSummary={isGeneratingSummary}
           isCreatingTasks={isCreatingTasks}
           messageCount={messages.length}
-        />
+        /> */}
 
         {/* Messages */}
         <MessageList
@@ -230,6 +250,12 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
           channelMembers={enhancedMembers}
           isLoading={false}
           autoFocus={true}
+          disabled={!userCanSendMessage}
+          permissionMessage={
+            !userCanSendMessage 
+              ? `As a ${currentUser?.role}, you can view this channel but cannot send messages. Contact an admin if you need to participate.`
+              : undefined
+          }
         />
       </View>
     </KeyboardAvoidingView>

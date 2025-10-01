@@ -18,6 +18,8 @@ import {
   TaskStatus,
 } from '../../types/task.types';
 import { MainStackParamList } from '../../types/navigation.types';
+import { useAppTranslation } from '../../hooks/useAppTranslation';
+import { useBackendTranslation } from '../../hooks/useBackendTranslation';
 import { RootState, AppDispatch } from '../../store/store';
 import {
   fetchTasks,
@@ -42,6 +44,8 @@ import { useWebSocket } from '../../services/websocketService';
 type TasksScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const TasksScreen: React.FC = () => {
+  const { t, common, tasks: tasksTr } = useAppTranslation();
+  const { translateTaskStatus, translateTaskPriority, translateBackendText } = useBackendTranslation();
   const navigation = useNavigation<TasksScreenNavigationProp>();
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch<AppDispatch>();

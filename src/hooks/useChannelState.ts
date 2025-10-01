@@ -18,6 +18,7 @@ export interface ChannelState {
   };
   actualChannelMembers: any[];
   isLoadingMembers: boolean;
+  error: string | null;
 }
 
 export interface ChannelActions {
@@ -29,6 +30,8 @@ export interface ChannelActions {
   // Channel operations
   loadChannelInfo: () => Promise<void>;
   generateSummary: () => Promise<void>;
+  retryChannelInfo: () => Promise<void>;
+  clearError: () => void;
 }
 
 export const useChannelState = (channelId: string): [ChannelState, ChannelActions] => {
@@ -64,6 +67,7 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
     try {
       // Use the single channel endpoint that includes member_details
       const channel = await channelService.getChannel(channelId);
+      console.log('Channel info received:', channel);
       
       // Only update state if component is still mounted
       if (!isMountedRef.current) return;
@@ -78,10 +82,30 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
       if ((channel as any).member_details && Array.isArray((channel as any).member_details)) {
         setActualChannelMembers((channel as any).member_details);
       }
-    } catch (error) {
+      
+      // Clear error on successful load
+      setError(null);
+      
+    } catch (error: any) {
       console.error('Error loading channel info:', error);
+      
       if (isMountedRef.current) {
-        setError(error instanceof Error ? error.message : 'Failed to load channel information');
+        // Provide more specific error messages based on error type
+        let errorMessage = 'Failed to load channel information';
+        
+        if (error?.message?.includes('timed out') || error?.code === 'TIMEOUT') {
+          errorMessage = 'Connection timed out. Please check your network and try again.';
+        } else if (error?.message?.includes('Network request failed')) {
+          errorMessage = 'Network error. Please check your internet connection.';
+        } else if (error?.statusCode === 403) {
+          errorMessage = 'You don\'t have permission to view this channel.';
+        } else if (error?.statusCode === 404) {
+          errorMessage = 'Channel not found.';
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+        
+        setError(errorMessage);
       }
     } finally {
       if (isMountedRef.current) {
@@ -116,21 +140,8 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
       // Only proceed if component is still mounted
       if (!isMountedRef.current) return;
       
-      // Mock summary data - will be replaced with real API when messages are implemented
-      const mockSummary: ChannelSummary = {
-        id: `summary_${Date.now()}`,
-        title: 'Channel Discussion Summary',
-        keyPoints: [
-          'Channel summary will be available when messages are implemented',
-        ],
-        decisions: [],
-        actionItems: [],
-        participants: [],
-        duration: '2 hours',
-        generatedAt: new Date(),
-      };
-      
-      setChannelSummary(mockSummary);
+      // TODO: Implement actual channel summary generation when backend is ready
+      // For now, summary functionality is disabled
     } catch (error) {
       console.error('Error generating summary:', error);
       if (isMountedRef.current) {
@@ -142,6 +153,18 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
       }
     }
   }, [channelId, isGeneratingSummary]);
+
+  // Retry function that clears pending requests and tries again
+  const retryChannelInfo = useCallback(async () => {
+    // Clear any pending requests to avoid cache issues
+    channelService.clearPendingRequests();
+    await loadChannelInfo();
+  }, [loadChannelInfo]);
+
+  // Clear error function
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
 
   // Load initial channel data on mount
   useEffect(() => {
@@ -177,6 +200,7 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
     channelStats,
     actualChannelMembers,
     isLoadingMembers,
+    error,
   }), [
     showSummaryModal,
     showKeyPointsModal,
@@ -187,6 +211,7 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
     channelStats,
     actualChannelMembers,
     isLoadingMembers,
+    error,
   ]);
   
   // Memoized actions object for performance
@@ -195,9 +220,13 @@ export const useChannelState = (channelId: string): [ChannelState, ChannelAction
     setShowSummaryModal,
     setShowKeyPointsModal,
     setShowTaskIntegration,
-    generateSummary,
+    
+    // Channel operations
     loadChannelInfo,
-  }), [generateSummary, loadChannelInfo]);
+    generateSummary,
+    retryChannelInfo,
+    clearError,
+  }), [loadChannelInfo, generateSummary, retryChannelInfo, clearError]);
 
   return [state, actions];
 };

@@ -20,6 +20,8 @@ interface MessageInputProps {
   channelMembers?: any[];
   isLoading?: boolean;
   autoFocus?: boolean;
+  disabled?: boolean;
+  permissionMessage?: string;
 }
 
 export const MessageInput: React.FC<MessageInputProps> = ({
@@ -38,6 +40,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   channelMembers = [],
   isLoading = false,
   autoFocus = false,
+  disabled = false,
+  permissionMessage,
 }) => {
   const insets = useSafeAreaInsets();
 
@@ -79,6 +83,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         channelMembers={channelMembers}
         isLoading={isLoading}
         autoFocus={autoFocus}
+        disabled={disabled}
+        permissionMessage={permissionMessage}
       />
     </View>
   );

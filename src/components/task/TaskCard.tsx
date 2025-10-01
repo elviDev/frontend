@@ -6,6 +6,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { Task } from '../../types/task.types';
 import { TaskUtils } from './TaskUtils';
+import { useBackendTranslation } from '../../hooks/useBackendTranslation';
 
 interface TaskCardProps {
   task: Task;
@@ -25,6 +26,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onLongPress,
   viewMode = 'list',
 }) => {
+  const { translateTaskStatus, translateTaskPriority, translateBackendText } = useBackendTranslation();
   const dueDateValue = task.dueDate || task.due_date;
   const dueDate = dueDateValue ? new Date(dueDateValue) : new Date();
   const isOverdue = TaskUtils.isOverdue(dueDate, task.status);
@@ -130,7 +132,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               className="text-xs font-semibold uppercase"
               style={{ color: TaskUtils.getStatusColor(task.status) }}
             >
-              {task.status?.replace(/_/g, ' ') || 'pending'}
+              {translateTaskStatus(task.status || 'pending')}
             </Text>
           </View>
 
@@ -144,7 +146,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               className="text-xs font-semibold uppercase"
               style={{ color: TaskUtils.getPriorityColor(task.priority) }}
             >
-              {task.priority}
+              {translateTaskPriority(task.priority)}
             </Text>
           </View>
         </View>
