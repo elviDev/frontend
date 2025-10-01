@@ -24,7 +24,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []
