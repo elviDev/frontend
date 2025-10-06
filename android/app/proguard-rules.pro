@@ -23,6 +23,41 @@
 # AsyncStorage
 -keep class com.reactnativecommunity.asyncstorage.** { *; }
 
+# Voice Recognition - Critical for AI features
+-keep class com.wenkesj.voice.** { *; }
+-keep class com.facebook.react.modules.permissions.** { *; }
+
+# Image Picker
+-keep class com.imagepicker.** { *; }
+-keep class com.reactnative.ivpusic.imagepicker.** { *; }
+
+# Document Picker
+-keep class io.github.elyx0.reactnativedocumentpicker.** { *; }
+
+# File System
+-keep class com.rnfs.** { *; }
+
+# Device Info
+-keep class com.learnium.RNDeviceInfo.** { *; }
+
+# Linear Gradient
+-keep class com.BV.LinearGradient.** { *; }
+
+# Gesture Handler
+-keep class com.swmansion.gesturehandler.** { *; }
+
+# Reanimated
+-keep class com.swmansion.reanimated.** { *; }
+
+# Safe Area Context
+-keep class com.th3rdwave.safeareacontext.** { *; }
+
+# Push Notifications
+-keep class com.dieam.reactnativepushnotification.** { *; }
+
+# SVG
+-keep class com.horcrux.svg.** { *; }
+
 # Remove debug logs in release
 -assumenosideeffects class android.util.Log {
     public static *** d(...);

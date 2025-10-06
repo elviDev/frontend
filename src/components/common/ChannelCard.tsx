@@ -37,6 +37,7 @@ interface ChannelCardProps {
   messages: number;
   files: number;
   isPrivate: boolean;
+  privacy?: 'public' | 'private' | 'restricted';
   onPress: () => void;
   onOptionsPress: () => void;
   index: number;
@@ -53,6 +54,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   members,
   memberList = [],
   isPrivate,
+  privacy = isPrivate ? 'private' : 'public',
   onPress,
   onOptionsPress,
   index,
@@ -160,15 +162,43 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
                 {translateChannelType(category)}
               </Text>
             </Animated.View>
-            {isPrivate && (
-              <Animated.View
-                entering={FadeInUp.delay(index * 150 + 220).duration(400)}
-                className="bg-orange-100 px-2 py-1 rounded-full flex-row items-center"
-              >
-                <MaterialIcon name="lock" size={10} color="#F97316" />
-                <Text className="text-orange-600 text-xs font-medium ml-1">Private</Text>
-              </Animated.View>
-            )}
+            <Animated.View
+              entering={FadeInUp.delay(index * 150 + 220).duration(400)}
+              className={`px-2 py-1 rounded-full flex-row items-center ${
+                privacy === 'private' 
+                  ? 'bg-orange-100' 
+                  : privacy === 'restricted' 
+                  ? 'bg-blue-100' 
+                  : 'bg-gray-100'
+              }`}
+            >
+              <MaterialIcon 
+                name={
+                  privacy === 'private' 
+                    ? 'lock' 
+                    : privacy === 'restricted' 
+                    ? 'security' 
+                    : 'public'
+                } 
+                size={10} 
+                color={
+                  privacy === 'private' 
+                    ? '#F97316' 
+                    : privacy === 'restricted' 
+                    ? '#3B82F6' 
+                    : '#6B7280'
+                } 
+              />
+              <Text className={`text-xs font-medium ml-1 ${
+                privacy === 'private' 
+                  ? 'text-orange-600' 
+                  : privacy === 'restricted' 
+                  ? 'text-blue-600' 
+                  : 'text-gray-600'
+              }`}>
+                {privacy === 'private' ? 'Private' : privacy === 'restricted' ? 'Restricted' : 'Public'}
+              </Text>
+            </Animated.View>
           </View>
           {/* Placeholder for spacing where options button was */}
           <View style={{ width: 34, height: 34 }} />

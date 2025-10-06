@@ -7,6 +7,7 @@ import { store } from './src/store/store';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/contexts/ToastContext';
 import { UIProvider } from './src/components/common/UIProvider';
+import { AuthorizationProvider } from './src/contexts/AuthorizationContext';
 
 // Voice testing utilities were removed during cleanup
 
@@ -15,11 +16,13 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Provider store={store}>
         <SafeAreaProvider>
-          <ToastProvider>
-            <UIProvider>
-              <AppNavigator />
-            </UIProvider>
-          </ToastProvider>
+          <AuthorizationProvider>
+            <ToastProvider>
+              <UIProvider>
+                <AppNavigator />
+              </UIProvider>
+            </ToastProvider>
+          </AuthorizationProvider>
         </SafeAreaProvider>
       </Provider>
     </GestureHandlerRootView>

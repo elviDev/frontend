@@ -79,11 +79,26 @@ class MessageService {
         const isRetryableError = this.isRetryableError(error);
         
         if (isLastAttempt || !isRetryableError) {
+          // For database timeout errors that failed retry, provide user-friendly message
+          if (error.error?.isRetryable === true) {
+            const userFriendlyError = {
+              ...error,
+              message: 'Service temporarily unavailable. Please try again in a moment.',
+              error: {
+                ...error.error,
+                message: 'Service temporarily unavailable. Please try again in a moment.'
+              }
+            };
+            console.error(`${operationName} failed after ${attempt + 1} attempts:`, userFriendlyError);
+            throw userFriendlyError;
+          }
+          
           console.error(`${operationName} failed after ${attempt + 1} attempts:`, error);
           throw error;
         }
         
-        const delayMs = this.retryDelay * Math.pow(2, attempt); // Exponential backoff
+        // Use recommended delay from backend for database errors, otherwise exponential backoff
+        const delayMs = error.error?.recommendedDelay || (this.retryDelay * Math.pow(2, attempt));
         console.warn(`${operationName} attempt ${attempt + 1} failed, retrying in ${delayMs}ms:`, error.message);
         await this.delay(delayMs);
       }
@@ -94,6 +109,11 @@ class MessageService {
   }
 
   private isRetryableError(error: any): boolean {
+    // Backend database timeout errors (our new retry flag)
+    if (error.error?.isRetryable === true) {
+      return true;
+    }
+    
     // Network errors
     if (error.name === 'TypeError' && error.message.includes('Network request failed')) {
       return true;
@@ -271,6 +291,7 @@ class MessageService {
       content: string;
       message_type?: 'text' | 'voice' | 'file' | 'system';
       reply_to_id?: string;
+      thread_root_id?: string; // Added for thread support
       mentions?: string[];
       attachments?: Array<{
         file_id: string;
@@ -302,15 +323,52 @@ class MessageService {
     return result;
   }
 
+  async sendThreadReply(
+    channelId: string,
+    parentMessageId: string,
+    messageData: {
+      content: string;
+      message_type?: 'text' | 'voice' | 'file' | 'system';
+      mentions?: string[];
+      attachments?: Array<{
+        file_id: string;
+        filename: string;
+        file_type: string;
+        file_size: number;
+      }>;
+      voice_data?: {
+        duration: number;
+        transcript?: string;
+        voice_file_id?: string;
+      };
+      metadata?: Record<string, any>;
+    }
+  ): Promise<ApiResponse<any>> {
+    const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${parentMessageId}/thread`, {
+      method: 'POST',
+      headers: await this.getAuthHeaders(),
+      body: JSON.stringify(messageData),
+    });
+
+    const result = await this.handleResponse<any>(response);
+    
+    // Invalidate channel message caches after successful thread reply
+    if (result.success) {
+      this.invalidateCache(`channelMessages-{"channelId":"${channelId}"`);
+    }
+    
+    return result;
+  }
+
   async editMessage(
     channelId: string,
     messageId: string,
-    content: string
+    data: { content?: string; reactions?: any[] }
   ): Promise<ApiResponse<any>> {
     const response = await fetch(`${API_BASE_URL}/channels/${channelId}/messages/${messageId}`, {
       method: 'PUT',
       headers: await this.getAuthHeaders(),
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(data),
     });
 
     const result = await this.handleResponse<any>(response);
@@ -340,7 +398,16 @@ class MessageService {
   }
 
 
-  // Reaction Management
+  // Update message reactions
+  async updateMessageReactions(
+    channelId: string,
+    messageId: string,
+    reactions: any[]
+  ): Promise<ApiResponse<any>> {
+    return this.editMessage(channelId, messageId, { reactions });
+  }
+
+  // Reaction Management (legacy - kept for backward compatibility)
   async toggleReaction(
     channelId: string,
     messageId: string,
@@ -435,7 +502,7 @@ class MessageService {
       {
         method: 'POST',
         headers: await this.getAuthHeaders(),
-        body: JSON.stringify({}),
+        body: JSON.stringify({ pinned: true }), // Backend expects pinned: boolean
       }
     );
 
@@ -456,8 +523,9 @@ class MessageService {
     const response = await fetch(
       `${API_BASE_URL}/channels/${channelId}/messages/${messageId}/pin`,
       {
-        method: 'DELETE',
+        method: 'POST', // Backend uses POST with pinned: false, not DELETE
         headers: await this.getAuthHeaders(),
+        body: JSON.stringify({ pinned: false }), // Backend expects pinned: boolean
       }
     );
 

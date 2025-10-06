@@ -16,7 +16,7 @@ export interface Channel {
   name: string;
   description?: string;
   category_id?: string;
-  channel_type: 'project' | 'department' | 'initiative' | 'temporary' | 'emergency' | 'announcement';
+  channel_type: 'general' | 'project' | 'department' | 'announcement' | 'initiative' | 'temporary';
   privacy_level: 'public' | 'private' | 'restricted';
   status: 'active' | 'archived' | 'paused' | 'completed';
   created_by: string;
@@ -29,7 +29,17 @@ export interface Channel {
   settings: Record<string, any>;
   integrations: Record<string, any>;
   activity_stats: Record<string, any>;
-  project_info: Record<string, any>;
+  project_info: {
+    tags?: string[];
+    color?: string;
+    start_date?: string;
+    end_date?: string;
+    budget?: number;
+    priority?: string;
+    milestones?: any[];
+    deliverables?: any[];
+    stakeholders?: any[];
+  };
   schedule: Record<string, any>;
   archived_at?: string;
   archived_by?: string;
@@ -39,6 +49,20 @@ export interface Channel {
   created_at: string;
   updated_at: string;
   member_details?: MemberDetail[];
+  tasks?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    assignee_details?: Array<{
+      id: string;
+      name: string;
+      email: string;
+      avatar_url?: string;
+      role: string;
+      phone?: string;
+    }>;
+  }>;
 }
 
 export interface Message {
@@ -88,6 +112,12 @@ export interface UpdateChannelData {
   settings?: Record<string, any>;
   tags?: string[];
   color?: string;
+  members?: Array<{
+    user_id?: string;
+    id?: string;
+    name?: string;
+    role?: string;
+  }>;
 }
 
 export interface SendMessageData {
@@ -216,8 +246,13 @@ class ChannelService {
   ): Promise<T> {
     try {
       const controller = new AbortController();
-      // Reduce timeout to 15 seconds for better mobile experience
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      // Use longer timeout for channel updates (member add/remove operations can be complex)
+      const timeout = (options.method === 'PUT' || options.method === 'POST') ? 60000 : 20000; // Increased to 60s for updates
+      console.log(`📡 Making ${options.method || 'GET'} request to ${endpoint} with ${timeout}ms timeout`);
+      const timeoutId = setTimeout(() => {
+        console.warn(`⏰ Request to ${endpoint} timed out after ${timeout}ms`);
+        controller.abort();
+      }, timeout);
 
       const response = await fetch(`${baseUrl}/${endpoint}`, {
         ...options,
@@ -243,12 +278,31 @@ class ChannelService {
       if (!response.ok) {
         const errorMessage = data.error?.message || `Request failed with status ${response.status}`;
         const errorCode = data.error?.code || 'REQUEST_FAILED';
+        const isRetryable = data.error?.isRetryable === true;
+        const recommendedDelay = data.error?.recommendedDelay || 2000;
         
         console.error(`ChannelService: API Error ${response.status}:`, {
           errorMessage,
           errorCode,
-          endpoint
+          endpoint,
+          isRetryable,
+          retryCount
         });
+
+        // Handle retryable database timeout errors
+        if (isRetryable && retryCount === 0) {
+          console.log(`ChannelService: Database timeout detected, retrying ${endpoint} after ${recommendedDelay}ms...`);
+          
+          // Wait for the recommended delay before retrying
+          await new Promise(resolve => setTimeout(resolve, recommendedDelay));
+          
+          try {
+            return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
+          } catch (retryError) {
+            console.error('ChannelService: Retry failed:', retryError);
+            // Fall through to throw user-friendly error
+          }
+        }
 
         // Handle 401/403 errors
         if (response.status === 401 || response.status === 403) {
@@ -277,6 +331,15 @@ class ChannelService {
           }
         }
 
+        // For retryable errors that failed retry, provide user-friendly message
+        if (isRetryable) {
+          throw new AuthError(
+            'Service temporarily unavailable. Please try again in a moment.',
+            'SERVICE_UNAVAILABLE',
+            response.status
+          );
+        }
+
         throw new AuthError(errorMessage, errorCode, response.status);
       }
 
@@ -289,9 +352,21 @@ class ChannelService {
       });
       
       if (error.name === 'AbortError') {
-        // Retry timeout errors once if this is the first attempt
+        // For channel updates, don't retry automatically as operation might have succeeded
+        if (retryCount === 0 && (options.method === 'PUT' || options.method === 'POST')) {
+          console.warn(`🚫 Channel update request to ${endpoint} aborted. Not retrying to avoid duplicate operations.`);
+          throw new AuthError(
+            'Request timed out. The operation may have completed successfully. Please refresh to see the latest data.',
+            'TIMEOUT_UPDATE',
+            408
+          );
+        }
+        
+        // Retry other requests once if this is the first attempt
         if (retryCount === 0) {
-          console.log(`ChannelService: Retrying timed out request to ${endpoint}...`);
+          console.log(`🔄 Retrying timed out request to ${endpoint}...`);
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
           return this.makeRequest(endpoint, options, 1);
         }
         
@@ -335,6 +410,10 @@ class ChannelService {
       method: 'POST',
       body: JSON.stringify(channelData),
     });
+    
+    // Clear request cache to ensure fresh data on next fetch
+    this.clearPendingRequests();
+    
     return response.data;
   }
 
@@ -343,6 +422,10 @@ class ChannelService {
       method: 'PUT',
       body: JSON.stringify(updateData),
     });
+    
+    // Clear request cache to ensure fresh data on next fetch
+    this.clearPendingRequests();
+    
     return response.data;
   }
 
@@ -350,6 +433,10 @@ class ChannelService {
     const response = await this.makeRequest<ApiResponse<{ message: string }>>(`/channels/${channelId}`, {
       method: 'DELETE',
     });
+    
+    // Clear request cache to ensure fresh data on next fetch
+    this.clearPendingRequests();
+    
     return response.success;
   }
 
@@ -374,6 +461,10 @@ class ChannelService {
       method: 'POST',
       body: JSON.stringify({ user_id: userId, role }),
     });
+    
+    // Clear request cache to ensure fresh data on next fetch (member count changes)
+    this.clearPendingRequests();
+    
     return response.success;
   }
 
@@ -381,6 +472,10 @@ class ChannelService {
     const response = await this.makeRequest<ApiResponse<{ message: string }>>(`/channels/${channelId}/members/${userId}`, {
       method: 'DELETE',
     });
+    
+    // Clear request cache to ensure fresh data on next fetch (member count changes)
+    this.clearPendingRequests();
+    
     return response.success;
   }
 
@@ -679,7 +774,7 @@ class ChannelService {
   }
 
   // Archive/Restore
-  async archiveChannel(channelId: string, reason?: string): Promise<boolean> {
+  async archiveChannel(channelId: string, _reason?: string): Promise<boolean> {
     // This would be implemented as a status update
     const response = await this.updateChannel(channelId, { 
       // Archive functionality would need to be added to the update endpoint

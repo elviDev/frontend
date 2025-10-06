@@ -34,7 +34,6 @@ import { channelService } from '../../services/api/channelService';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../contexts/ToastContext';
 import { CreateTaskData } from '../../types/task.types';
-import { useTranslation } from 'react-i18next';
 import { VoiceService, TaskFormData } from '../../services/api/voiceService';
 import { PromptInput } from '../../components/voice/PromptInput';
 
@@ -99,7 +98,6 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { t } = useTranslation();
   const { user } = useAuth();
   const { showSuccess, showError, showWarning } = useToast();
   
@@ -208,7 +206,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
             channelMembers = membersResponse.data.map((member: any) => ({
               id: member.user_id,
               name: member.user_name || 'Unknown User',
-              avatar: member.user_avatar || member.user_name?.charAt(0).toUpperCase() || '?',
+              avatar_url: member.user_avatar,
               role: member.role || 'Member',
               email: member.user_email || `${member.user_id || 'unknown'}@company.com`,
             }));
@@ -234,7 +232,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         channelMembers.unshift({
           id: user.id,
           name: user.name || 'You',
-          avatar: user.name ? user.name.split(' ').map(n => n[0]).join('') : 'YU',
+          avatar_url: undefined,
           role: 'Current User',
           email: user.email || 'you@company.com',
         });
@@ -276,7 +274,7 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
               const channelMembers = membersResponse.data.map((member: any) => ({
                 id: member.user_id,
                 name: member.user_name || 'Unknown User',
-                avatar: member.user_avatar || member.user_name?.charAt(0).toUpperCase() || '?',
+                avatar_url: member.user_avatar,
                 role: member.role || 'Member',
                 email: member.user_email || `${member.user_id || 'unknown'}@company.com`,
               }));
@@ -526,8 +524,8 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
         priority: formData.priority,
         task_type: formData.category as any,
         assigned_to: formData.assignees.map(a => a.id),
-        owned_by: formData.owned_by || user?.id || '',
-        created_by: user.id,
+        owned_by: formData.owned_by || user?.id!,
+        created_by: user.id!,
         channel_id: formData.channel_id,
         due_date: formData.endDate,
         start_date: formData.startDate,
@@ -572,8 +570,15 @@ export const TaskCreateScreen: React.FC<TaskCreateScreenProps> = ({
           if (isEditMode && route.params?.taskId) {
             navigation.replace('TaskDetailScreen', { taskId: route.params.taskId });
           } else {
-            // For new tasks, navigate to the specific task detail screen to ensure it's available
-            navigation.navigate('TaskDetailScreen', { taskId: taskId });
+            // For new tasks, reset navigation stack to go TasksScreen -> TaskDetail
+            // This ensures back button goes to task list, not back to form
+            navigation.reset({
+              index: 1,
+              routes: [
+                { name: 'TasksScreen' },
+                { name: 'TaskDetailScreen', params: { taskId: taskId } },
+              ],
+            });
           }
         }, 1500);
       } else {

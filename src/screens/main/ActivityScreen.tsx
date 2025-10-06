@@ -315,9 +315,8 @@ export const ActivityScreen: React.FC = () => {
 
   // Removed console.log to improve performance
 
-  const renderActivityItem = ({ item }: { item: ActivityItem }) => (
+  const ActivityItemComponent = React.memo(({ item }: { item: ActivityItem }) => (
     <TouchableOpacity
-      key={item.id}
       className={`mx-4 mb-3 p-4 rounded-xl ${
         item.read ? 'bg-white' : 'bg-blue-50 border border-blue-200'
       } shadow-sm`}
@@ -345,7 +344,7 @@ export const ActivityScreen: React.FC = () => {
         )}
       </View>
     </TouchableOpacity>
-  );
+  ));
 
   if (loading && activities.length === 0) {
     return (
@@ -445,7 +444,9 @@ export const ActivityScreen: React.FC = () => {
             )}
           </View>
         ) : (
-          filteredActivities.map((item) => renderActivityItem({ item }))
+          filteredActivities.map((item) => (
+            <ActivityItemComponent key={item.id} item={item} />
+          ))
         )}
       </ScrollView>
     </View>

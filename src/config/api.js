@@ -13,20 +13,26 @@ const API_CONFIG = {
   // Development URLs
   // For real device USB debugging, use your machine's IP address
   // For Android emulator, use 10.0.2.2 instead of localhost
-  // For iOS simulator, use your machine's IP address
-  DEV_BASE_URL: 'http://172.17.241.181:3001/api/v1',  // Updated for USB debugging
-  DEV_WS_URL: 'http://172.17.241.181:3001',
+
+  // Emulator URLs
+  DEV_BASE_URL_EMULATOR: 'http://10.0.2.2:3000/api/v1',
+  DEV_WS_URL_EMULATOR: 'http://10.0.2.2:3000',
   
-  // Emulator URLs (uncomment if using emulator)
-  // DEV_BASE_URL: 'http://10.0.2.2:3001/api/v1',
-  // DEV_WS_URL: 'http://10.0.2.2:3001',
+  // Real device URLs (USB debugging)
+  DEV_BASE_URL_DEVICE: 'http://172.23.27.181:3000/api/v1',
+  DEV_WS_URL_DEVICE: 'http://172.23.27.181:3000',
 };
 
 // Development environment for real device USB debugging
-export const API_BASE_URL = API_CONFIG.DEV_BASE_URL;
-export const WS_BASE_URL = API_CONFIG.DEV_WS_URL;
+// export const API_BASE_URL = API_CONFIG.DEV_BASE_URL_DEVICE;
+// export const WS_BASE_URL = API_CONFIG.DEV_WS_URL_DEVICE;
+
+// Development environment for emulator (uncomment if using emulator)
+// export const API_BASE_URL = API_CONFIG.DEV_BASE_URL_EMULATOR;
+// export const WS_BASE_URL = API_CONFIG.DEV_WS_URL_EMULATOR;
 
 // Production environment (uncomment for release builds)
-// export const API_BASE_URL = API_CONFIG.BASE_URL;
-// export const WS_BASE_URL = API_CONFIG.WS_URL;
-export default API_CONFIG
+export const API_BASE_URL = API_CONFIG.BASE_URL;
+export const WS_BASE_URL = API_CONFIG.WS_URL;
+
+export default API_CONFIG;

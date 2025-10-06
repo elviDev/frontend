@@ -34,17 +34,40 @@ export const TaskCreateNavigation: React.FC<TaskCreateNavigationProps> = ({
   const isLastStep = currentStep >= totalSteps;
 
   return (
-    <View className="bg-white border-t border-gray-200 p-4 shadow-sm">
-      <View className="flex-row justify-between items-center">
+    <View style={{
+      backgroundColor: 'white',
+      borderTopWidth: 1,
+      borderTopColor: '#E5E7EB',
+      padding: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 5,
+    }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* Back button */}
         {canGoBack && currentStep > 1 ? (
           <TouchableOpacity
             onPress={onPrevious}
-            className="bg-gray-100 rounded-2xl py-3 px-4 flex-row items-center justify-center"
-            style={{ minWidth: 120 }}
+            style={{
+              backgroundColor: '#F3F4F6',
+              borderRadius: 16,
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 120,
+            }}
           >
             <MaterialIcon name="arrow-back" size={20} color="#6B7280" />
-            <Text className="text-gray-700 font-semibold text-base ml-2">
+            <Text style={{
+              color: '#374151',
+              fontWeight: '600',
+              fontSize: 16,
+              marginLeft: 8,
+            }}>
               Previous
             </Text>
           </TouchableOpacity>
@@ -66,9 +89,13 @@ export const TaskCreateNavigation: React.FC<TaskCreateNavigationProps> = ({
                 }
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                className="rounded-2xl py-3 px-5 flex-row items-center justify-center"
                 style={{
-                  borderRadius: 12,
+                  borderRadius: 16,
+                  paddingVertical: 12,
+                  paddingHorizontal: 20,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 {isLoading ? (
@@ -76,7 +103,12 @@ export const TaskCreateNavigation: React.FC<TaskCreateNavigationProps> = ({
                 ) : (
                   <MaterialIcon name="check-circle" size={22} color="white" />
                 )}
-                <Text className="text-white font-bold text-base ml-2">
+                <Text style={{
+                  color: 'white',
+                  fontWeight: 'bold',
+                  fontSize: 16,
+                  marginLeft: 8,
+                }}>
                   {isLoading ? (completeText === 'Update Task' ? 'Updating...' : 'Creating...') : completeText}
                 </Text>
               </LinearGradient>
@@ -88,11 +120,20 @@ export const TaskCreateNavigation: React.FC<TaskCreateNavigationProps> = ({
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={{
-                  borderRadius: 12,
+                  borderRadius: 16,
+                  paddingVertical: 12,
+                  paddingHorizontal: 20,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
-                className="rounded-2xl py-3 px-5 flex-row items-center justify-center"
               >
-                <Text className="text-white font-bold text-base mr-2">
+                <Text style={{
+                  color: 'white',
+                  fontWeight: 'bold',
+                  fontSize: 16,
+                  marginRight: 8,
+                }}>
                   Continue
                 </Text>
                 <MaterialIcon name="arrow-forward" size={20} color="white" />

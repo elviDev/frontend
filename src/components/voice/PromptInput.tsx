@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   TextInput,
   TouchableOpacity,
@@ -108,59 +108,79 @@ export const PromptInput: React.FC<PromptInputProps> = ({
 
   const textInputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const currentTextRef = useRef<string>('');
+  const currentSelectionRef = useRef<number>(0);
 
   // Animations
   const pulseAnimation = useSharedValue(0);
   const sendButtonScale = useSharedValue(1);
 
+  // Cleanup effect for timers
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
+
   // Voice Setup
   useEffect(() => {
     const setupVoice = async () => {
       try {
-        // Check if Voice module is properly initialized
-        if (!Voice || typeof Voice.isAvailable !== 'function') {
-          console.log('Voice module not properly initialized');
+        // Check if Voice is available before setting up
+        if (!Voice) {
+          console.log('Voice module not available');
           return;
         }
 
-        // Check if Voice is available first
-        const isAvailable = await Voice.isAvailable();
-        if (!isAvailable) {
-          console.log('Voice recognition not available on this device');
-          return;
+        // Setup event listeners with error protection
+        try {
+          Voice.onSpeechStart = onSpeechStart;
+          Voice.onSpeechEnd = onSpeechEnd;
+          Voice.onSpeechResults = onSpeechResults;
+          Voice.onSpeechError = onSpeechError;
+          Voice.onSpeechRecognized = onSpeechRecognized;
+        } catch (listenerError) {
+          console.log('Error setting up voice listeners:', listenerError);
         }
 
-        // Setup event listeners with null checks
-        if (Voice.onSpeechStart) Voice.onSpeechStart = onSpeechStart;
-        if (Voice.onSpeechEnd) Voice.onSpeechEnd = onSpeechEnd;
-        if (Voice.onSpeechResults) Voice.onSpeechResults = onSpeechResults;
-        if (Voice.onSpeechError) Voice.onSpeechError = onSpeechError;
+        // Simple availability check
+        try {
+          const isAvailable = await Voice.isAvailable();
+          console.log('Voice recognition available:', isAvailable);
+        } catch (error) {
+          console.log('Voice availability check failed:', error);
+        }
 
         const androidPermissionChecking = async () => {
           if (Platform.OS === 'android') {
-            const granted = await PermissionsAndroid.request(
-              PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-              {
-                title: 'Microphone Permission',
-                message: 'This app needs access to your microphone to recognize speech',
-                buttonNeutral: 'Ask Me Later',
-                buttonNegative: 'Cancel',
-                buttonPositive: 'OK',
-              }
-            );
-
-            if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-              console.log('Microphone permission granted');
-            } else {
-              console.log('Microphone permission denied');
-              showError('Microphone permission is required for voice input');
-            }
-
             try {
-              const getService = await Voice.getSpeechRecognitionServices();
-              console.log('Speech recognition services:', getService);
+              const granted = await PermissionsAndroid.request(
+                PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+                {
+                  title: 'Microphone Permission',
+                  message: 'This app needs access to your microphone to recognize speech',
+                  buttonNeutral: 'Ask Me Later',
+                  buttonNegative: 'Cancel',
+                  buttonPositive: 'OK',
+                }
+              );
+
+              if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                console.log('Microphone permission granted');
+              } else {
+                console.log('Microphone permission denied');
+              }
+
+              try {
+                const services = await Voice.getSpeechRecognitionServices();
+                console.log('Speech recognition services:', services);
+              } catch (error) {
+                console.log('Error getting speech services:', error);
+              }
             } catch (error) {
-              console.log('Error getting speech services:', error);
+              console.log('Android permission check failed:', error);
             }
           }
         };
@@ -174,57 +194,69 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     setupVoice();
 
     return () => {
-      try {
-        // Clean up voice listeners and destroy instance
-        if (Voice && typeof Voice.destroy === 'function') {
-          Voice.destroy().then(() => {
+      const cleanup = async () => {
+        try {
+          if (Voice) {
+            // Stop any active voice recognition first
+            await Promise.allSettled([
+              Voice.stop(),
+              Voice.cancel()
+            ]);
+            
+            // Remove listeners before destroying
             if (Voice.removeAllListeners) {
               Voice.removeAllListeners();
             }
-          }).catch(console.warn);
+            
+            // Finally destroy the instance
+            await Voice.destroy();
+          }
+        } catch (error) {
+          console.warn('Voice cleanup error:', error);
         }
-      } catch (error) {
-        console.warn('Voice cleanup error:', error);
-      }
+      };
+      
+      cleanup();
     };
   }, []);
 
-  // Voice Event Handlers
+  // Voice Event Handlers with strict control
   const onSpeechStart = () => {
-    console.log('Speech recognition started');
+    console.log('Speech started');
     setIsListening(true);
+    pulseAnimation.value = withRepeat(withTiming(1, { duration: 1000 }), -1, true);
+  };
+
+  const onSpeechRecognized = () => {
+    console.log('Speech recognized');
+    // Don't stop listening here - let it continue for longer recordings
   };
 
   const onSpeechEnd = () => {
-    console.log('Speech recognition ended');
+    console.log('Speech ended');
     setIsListening(false);
+    pulseAnimation.value = withTiming(0);
   };
+
 
   const onSpeechResults = (event: any) => {
     console.log('Speech results:', event);
-    if (event.value && event.value.length > 0) {
-      const recognizedText = event.value[0];
+    setIsListening(false);
+    pulseAnimation.value = withTiming(0);
+    
+    if (event?.value?.[0]) {
+      const recognizedText = event.value[0].trim();
+      const currentText = currentTextRef.current.trim();
       
-      // Get current cursor position or append to end
-      const cursorPos = selectionStart || text.length;
-      const textBefore = text.substring(0, cursorPos);
-      const textAfter = text.substring(cursorPos);
-      
-      // Add space before recognized text if there's existing text
-      const separator = textBefore.trim() ? ' ' : '';
-      const newText = textBefore + separator + recognizedText + textAfter;
+      let newText;
+      if (currentText) {
+        // Add space before voice text if current text doesn't end with space
+        newText = currentText + (currentText.endsWith(' ') ? '' : ' ') + recognizedText;
+      } else {
+        newText = recognizedText;
+      }
       
       setText(newText);
-      
-      // Update cursor position to end of inserted text
-      const newCursorPos = cursorPos + separator.length + recognizedText.length;
-      setSelectionStart(newCursorPos);
-      
-      // Focus the text input
-      setTimeout(() => {
-        textInputRef.current?.focus();
-      }, 100);
-      
       showSuccess('Voice input added!');
     }
   };
@@ -233,57 +265,42 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     console.log('Speech error:', error);
     setIsListening(false);
     pulseAnimation.value = withTiming(0);
-    
-    // Handle different error codes more gracefully
-    if (error?.error?.code === '7' || error?.error?.message?.includes('No match')) {
-      // No match found - this is normal, just inform user
-      showInfo('No speech detected. Try speaking louder or closer to the microphone.');
-    } else if (error?.error?.code === '6') {
-      // No input
-      showInfo('No speech detected. Please try again.');
-    } else {
-      // Other errors
-      showError('Voice recognition error. Please try again.');
-    }
+    showError('Voice recognition failed. Please try again.');
   };
 
   // Voice Control Functions
   const startListening = async () => {
     try {
-      if (!Voice || typeof Voice.start !== 'function') {
-        showError('Voice recognition not available');
-        return;
-      }
+      if (isListening) return;
       
       await Voice.start('en-US');
       setIsListening(true);
-      pulseAnimation.value = withRepeat(
-        withTiming(1, { duration: 1000 }),
-        -1,
-        true,
-      );
-      showInfo('Listening... Speak now');
+      pulseAnimation.value = withRepeat(withTiming(1, { duration: 1000 }), -1, true);
     } catch (error) {
-      console.log('Start listening error:', error);
+      console.log('Start error:', error);
       showError('Failed to start voice recognition');
     }
   };
 
   const stopListening = async () => {
     try {
-      if (!Voice || typeof Voice.stop !== 'function') {
-        setIsListening(false);
-        pulseAnimation.value = withTiming(0);
-        return;
-      }
-      
       await Voice.stop();
       setIsListening(false);
       pulseAnimation.value = withTiming(0);
     } catch (error) {
-      console.log('Stop listening error:', error);
+      console.log('Stop error:', error);
     }
   };
+
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    currentTextRef.current = text;
+  }, [text]);
+
+  React.useEffect(() => {
+    currentSelectionRef.current = selectionStart;
+  }, [selectionStart]);
+
 
   // Text handling functions
   const handleTextChange = (newText: string) => {
@@ -327,7 +344,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     }, 300); // 300ms debounce delay
   };
 
-  const checkForMentions = (currentText: string, cursorPos: number) => {
+  const checkForMentions = useCallback((currentText: string, cursorPos: number) => {
     // Get text before cursor position
     const textBeforeCursor = currentText.substring(0, cursorPos);
 
@@ -342,7 +359,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       setShowMentionSuggestions(false);
       setMentionQuery('');
     }
-  };
+  }, []);
 
   const insertMention = (user: MentionUser) => {
     const currentText = text;
@@ -427,7 +444,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     if (text) {
       checkForMentions(text, selectionStart);
     }
-  }, [selectionStart]);
+  }, [text, selectionStart, checkForMentions]);
 
   // File handling
   const handleFilePicker = async () => {
@@ -813,7 +830,9 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       {isListening && (
         <View className="mt-2 px-4 flex-row items-center justify-center">
           <MaterialIcon name="mic" size={16} color="#3B82F6" />
-          <Text className="text-blue-600 text-sm ml-2">Listening for speech...</Text>
+          <Text className="text-blue-600 text-sm ml-2">
+            🎤 Listening... Speak clearly (15 seconds max)
+          </Text>
         </View>
       )}
       </KeyboardAvoidingView>

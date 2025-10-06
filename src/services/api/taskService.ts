@@ -3,6 +3,7 @@ import { Task, CreateTaskData, TaskFilter, TaskStats, TaskSort, TaskStatus, Task
 import { API_BASE_URL } from '../../config/api';
 import { authService } from './authService';
 import { tokenManager } from '../tokenManager';
+import { TaskDataTransformer } from '../../utils/dataTransformers';
 
 export interface TaskListResponse {
   success: boolean;
@@ -11,7 +12,7 @@ export interface TaskListResponse {
     total: number;
     limit: number;
     offset: number;
-    hasMore: boolean;
+    has_more: boolean;
   };
   timestamp: string;
 }
@@ -227,6 +228,7 @@ class TaskService {
     if (filters) {
       console.log('📋 TaskService: Processing filters:', filters);
       
+      // Filters now match backend format directly - no transformation needed
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           if (Array.isArray(value)) {
@@ -239,23 +241,9 @@ class TaskService {
           } else if (value instanceof Date) {
             // Handle Date objects properly
             params.append(key, value.toISOString());
-          } else if (typeof value === 'object') {
-            // Handle other objects (like dueDate ranges)
-            try {
-              params.append(key, JSON.stringify(value));
-            } catch (error) {
-              console.warn('📋 TaskService: Failed to stringify filter value:', { key, value, error });
-            }
           } else {
             // Handle primitive values
-            // For known array fields, convert single values to array format
-            const arrayFields = ['status', 'priority', 'task_type', 'assignedTo', 'tags', 'category', 'assignee', 'channel'];
-            if (arrayFields.includes(key)) {
-              // Add as array even if single value
-              params.append(key, value.toString());
-            } else {
-              params.append(key, value.toString());
-            }
+            params.append(key, value.toString());
           }
         }
       });
@@ -270,7 +258,13 @@ class TaskService {
     console.log('📋 TaskService: Making request with endpoint:', endpoint);
     console.log('📋 TaskService: Final query params:', Object.fromEntries(params.entries()));
     
-    return this.makeRequest<TaskListResponse>(endpoint);
+    const response = await this.makeRequest<any>(endpoint);
+    
+    // Transform response data
+    return {
+      ...response,
+      data: TaskDataTransformer.transformTasks(response.data || []),
+    };
   }
 
   /**
@@ -279,13 +273,19 @@ class TaskService {
   async getTask(taskId: string): Promise<TaskResponse> {
     // Add timestamp to prevent any HTTP caching
     const timestamp = Date.now();
-    return this.makeRequest<TaskResponse>(`/tasks/${taskId}?t=${timestamp}&_refresh=${Math.random()}`, {
+    const response = await this.makeRequest<any>(`/tasks/${taskId}?t=${timestamp}&_refresh=${Math.random()}`, {
       headers: {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0'
       }
     });
+    
+    // Transform response data
+    return {
+      ...response,
+      data: TaskDataTransformer.transformTask(response.data),
+    };
   }
 
   /**
@@ -488,7 +488,7 @@ class TaskService {
       throw new Error('Progress percentage must be a number between 0 and 100');
     }
     
-    return this.updateTask(taskId, { progress: progressPercentage });
+    return this.updateTask(taskId, { progress_percentage: progressPercentage });
   }
 
   /**
@@ -572,7 +572,7 @@ class TaskService {
     while (hasMore && allTasks.length < 10000) { // Safety limit
       const response = await this.getTasks({ ...filters, limit, offset });
       allTasks.push(...response.data);
-      hasMore = response.pagination.hasMore;
+      hasMore = response.pagination.has_more;
       offset += limit;
     }
     
@@ -596,11 +596,11 @@ class TaskService {
           this.escapeCsvField(task.title),
           this.escapeCsvField(task.status),
           this.escapeCsvField(task.priority),
-          this.escapeCsvField((task.assignees?.map(a => a.name) ?? []).join(', ')),
-          this.escapeCsvField(task.channelName || ''),
-          this.escapeCsvField(task.dueDate ? new Date(task.dueDate).toLocaleDateString() : ''),
+          this.escapeCsvField((task.assignee_details?.map(a => a.name) ?? []).join(', ')),
+          this.escapeCsvField(task.channel_name || ''),
+          this.escapeCsvField(task.due_date ? new Date(task.due_date).toLocaleDateString() : ''),
           this.escapeCsvField(new Date(task.created_at).toLocaleDateString()),
-          this.escapeCsvField((task.progress !== undefined ? task.progress : '').toString())
+          this.escapeCsvField((task.progress_percentage !== undefined ? task.progress_percentage : '').toString())
         ]);
         
         const csvContent = [csvHeaders.join(','), ...csvRows.map(row => row.join(','))].join('\n');
@@ -619,11 +619,11 @@ class TaskService {
           task.title.replace(/\t/g, ' '),
           task.status,
           task.priority,
-          (task.assignees ?? []).map(a => a.name).join(', '),
-          task.channelName || '',
-          task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '',
+          (task.assignee_details ?? []).map(a => a.name).join(', '),
+          task.channel_name || '',
+          task.due_date ? new Date(task.due_date).toLocaleDateString() : '',
           new Date(task.created_at).toLocaleDateString(),
-          (task.progress !== undefined ? task.progress.toString() : '')
+          (task.progress_percentage !== undefined ? task.progress_percentage.toString() : '')
         ]);
         
         const content = [headers.join('\t'), ...rows.map(row => row.join('\t'))].join('\n');
@@ -684,13 +684,7 @@ class TaskService {
     // Include author ID if provided  
     if (authorId?.trim()) {
       payload.author_id = authorId;
-      payload.user_id = authorId; // Some backends use user_id instead
-      payload.created_by = authorId; // Some backends use created_by
     }
-    
-    // Add timestamp
-    payload.timestamp = new Date().toISOString();
-    payload.created_at = new Date().toISOString();
     
     console.log('📋 TaskService addComment request:', {
       taskId,

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError } from './authService';
 import { tokenManager } from '../tokenManager';
 import { API_BASE_URL } from '../../config/api';
+import { ErrorHandler } from '../../utils/errorHandler';
 
 export interface User {
   id: string;
@@ -20,6 +21,7 @@ export interface User {
   last_active?: string;
   created_at: string;
   updated_at: string;
+  permissions?: string[];
 }
 
 export interface UpdateUserData {
@@ -118,7 +120,7 @@ class UserService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(`${baseUrl}/${endpoint}`, {
+      const response = await fetch(`${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`, {
         ...options,
         headers,
         signal: controller.signal,
@@ -142,12 +144,31 @@ class UserService {
       if (!response.ok) {
         const errorMessage = data.error?.message || `Request failed with status ${response.status}`;
         const errorCode = data.error?.code || 'REQUEST_FAILED';
+        const isRetryable = data.error?.isRetryable === true;
+        const recommendedDelay = data.error?.recommendedDelay || 2000;
         
         console.error(`UserService: API Error ${response.status}:`, {
           errorMessage,
           errorCode,
-          endpoint
+          endpoint,
+          isRetryable,
+          retryCount
         });
+
+        // Handle retryable database timeout errors
+        if (isRetryable && retryCount === 0) {
+          console.log(`UserService: Database timeout detected, retrying ${endpoint} after ${recommendedDelay}ms...`);
+          
+          // Wait for the recommended delay before retrying
+          await new Promise(resolve => setTimeout(resolve, recommendedDelay));
+          
+          try {
+            return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
+          } catch (retryError) {
+            console.error('UserService: Retry failed:', retryError);
+            // Fall through to throw user-friendly error
+          }
+        }
 
         // Handle 401/403 errors
         if (response.status === 401 || response.status === 403) {
@@ -169,6 +190,15 @@ class UserService {
               throw new AuthError('Session expired. Please log in again.', 'SESSION_EXPIRED', 401);
             }
           }
+        }
+
+        // For retryable errors that failed retry, provide user-friendly message
+        if (isRetryable) {
+          throw new AuthError(
+            'Service temporarily unavailable. Please try again in a moment.',
+            'SERVICE_UNAVAILABLE',
+            response.status
+          );
         }
 
         throw new AuthError(errorMessage, errorCode, response.status);
@@ -204,12 +234,20 @@ class UserService {
 
   // Get current user profile
   async getCurrentUser(): Promise<User> {
-    const response = await this.makeRequest<{
-      success: boolean;
-      data: { user: User };
-    }>('/auth/me');
-    
-    return response.data.user;
+    try {
+      const response = await this.makeRequest<{
+        success: boolean;
+        data: { user: User };
+      }>('/auth/me');
+      
+      return response.data.user;
+    } catch (error: any) {
+      const userError = ErrorHandler.handleApiError(error, {
+        component: 'UserService',
+        action: 'getCurrentUser'
+      });
+      throw userError;
+    }
   }
 
   // Get user by ID

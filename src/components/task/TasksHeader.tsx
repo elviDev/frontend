@@ -6,6 +6,7 @@ import Animated, {
   SharedValue,
 } from 'react-native-reanimated';
 import Feather from 'react-native-vector-icons/Feather';
+import { useAuthorization } from '../../contexts/AuthorizationContext';
 
 interface TasksHeaderProps {
   viewMode: 'list' | 'board' | 'calendar';
@@ -20,6 +21,8 @@ export const TasksHeader: React.FC<TasksHeaderProps> = ({
   onCreateTask,
   headerScale,
 }) => {
+  const { canCreateTasks } = useAuthorization();
+  
   const animatedHeaderStyle = useAnimatedStyle(() => ({
     transform: [{ scale: headerScale.value }],
   }));
@@ -80,22 +83,24 @@ export const TasksHeader: React.FC<TasksHeaderProps> = ({
             ))}
           </View>
 
-          {/* Add Task Button */}
-          <TouchableOpacity
-            onPress={() => {
-              console.log('Pressed create task button');
-              handleCreateTaskPress();
-            }}
-            activeOpacity={0.8}
-            style={{
-              backgroundColor: '#3b82f6',
-              borderRadius: 8,
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-            }}
-          >
-            <Feather name="plus" size={20} color="white" />
-          </TouchableOpacity>
+          {/* Add Task Button - Only show for users with create permission */}
+          {canCreateTasks() && (
+            <TouchableOpacity
+              onPress={() => {
+                console.log('Pressed create task button');
+                handleCreateTaskPress();
+              }}
+              activeOpacity={0.8}
+              style={{
+                backgroundColor: '#3b82f6',
+                borderRadius: 8,
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+              }}
+            >
+              <Feather name="plus" size={20} color="white" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Animated.View>

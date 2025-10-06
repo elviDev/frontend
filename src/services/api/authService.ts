@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { tokenManager } from '../tokenManager';
 import type { User, AuthTokens } from '../../types/auth';
+import { ErrorHandler } from '../../utils/errorHandler';
 
 import { API_BASE_URL } from '../../config/api';
 console.log("BASE URL FOR THE BACKEND!!!!!!!",API_BASE_URL)
@@ -97,6 +98,7 @@ class AuthService {
   private async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {},
+    retryCount: number = 0
   ): Promise<T> {
     const token = await this.getAccessToken();
 
@@ -183,6 +185,47 @@ class AuthService {
       if (!response.ok) {
         const errorMessage = data.error?.message || `Request failed with status ${response.status}`;
         const errorCode = data.error?.code || 'REQUEST_FAILED';
+        const isRetryable = data.error?.isRetryable === true;
+        const recommendedDelay = data.error?.recommendedDelay || 2000;
+        
+        console.error(`AuthService: API Error ${response.status}:`, {
+          errorMessage,
+          errorCode,
+          endpoint,
+          isRetryable,
+          retryCount
+        });
+
+        // Handle retryable database timeout errors
+        if (isRetryable && retryCount === 0) {
+          console.log(`AuthService: Database timeout detected, retrying ${endpoint} after ${recommendedDelay}ms...`);
+          
+          // Wait for the recommended delay before retrying
+          await new Promise(resolve => setTimeout(resolve, recommendedDelay));
+          
+          try {
+            return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
+          } catch (retryError) {
+            console.error('AuthService: Retry failed:', retryError);
+            // Fall through to throw user-friendly error
+          }
+        }
+        
+        // Special handling for auth-specific errors
+        if (response.status === 401) {
+          // Clear tokens on authentication failure
+          await this.clearTokens();
+        }
+        
+        // For retryable errors that failed retry, provide user-friendly message
+        if (isRetryable) {
+          throw new AuthError(
+            'Service temporarily unavailable. Please try again in a moment.',
+            'SERVICE_UNAVAILABLE',
+            response.status
+          );
+        }
+        
         throw new AuthError(errorMessage, errorCode, response.status);
       }
 
@@ -234,28 +277,39 @@ class AuthService {
   }
 
   async login(credentials: LoginRequest): Promise<AuthResponse> {
-    // Test connectivity first in development mode
-    if (__DEV__) {
-      const isConnected = await this.testConnection();
-      if (!isConnected) {
-        throw new AuthError(
-          'Cannot connect to backend server. Please ensure the backend is running at' + API_BASE_URL,
-          'CONNECTION_FAILED',
-          0
-        );
+    try {
+      // Test connectivity first in development mode
+      if (__DEV__) {
+        const isConnected = await this.testConnection();
+        if (!isConnected) {
+          throw new AuthError(
+            'Cannot connect to backend server. Please ensure the backend is running at' + API_BASE_URL,
+            'CONNECTION_FAILED',
+            0
+          );
+        }
       }
+
+      const response = await this.makeRequest<AuthResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(credentials),
+      });
+
+      if (response.success) {
+        await this.storeTokens(response.data);
+        console.log('✅ Login successful, tokens stored');
+      }
+
+      return response;
+    } catch (error: any) {
+      const authError = ErrorHandler.handleAuthError(error, {
+        component: 'AuthService',
+        action: 'login',
+        additionalData: { email: credentials.email }
+      });
+      console.error('❌ Login failed:', authError);
+      throw authError;
     }
-
-    const response = await this.makeRequest<AuthResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify(credentials),
-    });
-
-    if (response.success) {
-      await this.storeTokens(response.data);
-    }
-
-    return response;
   }
 
   async register(
@@ -361,6 +415,33 @@ class AuthService {
       success: boolean;
       message: string;
     }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    return response;
+  }
+
+  async verifyOTP(
+    email: string,
+    otp: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const response = await this.makeRequest<{
+      success: boolean;
+      message: string;
+    }>('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+    });
+    return response;
+  }
+
+  async requestOTP(
+    email: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const response = await this.makeRequest<{
+      success: boolean;
+      message: string;
+    }>('/auth/request-otp', {
       method: 'POST',
       body: JSON.stringify({ email }),
     });
@@ -495,10 +576,29 @@ class AuthService {
   }
 
   // Auto-refresh token wrapper
-  async withAuth<T>(apiCall: () => Promise<T>): Promise<T> {
+  async withAuth<T>(apiCall: () => Promise<T>, retryCount: number = 0): Promise<T> {
     try {
       return await apiCall();
     } catch (error: any) {
+      // Handle retryable database timeout errors
+      const isRetryable = error.error?.isRetryable === true;
+      const recommendedDelay = error.error?.recommendedDelay || 2000;
+      
+      if (isRetryable && retryCount === 0) {
+        console.log(`AuthService.withAuth: Database timeout detected, retrying after ${recommendedDelay}ms...`);
+        
+        // Wait for the recommended delay before retrying
+        await new Promise(resolve => setTimeout(resolve, recommendedDelay));
+        
+        try {
+          return this.withAuth(apiCall, 1); // Retry once with retryCount = 1
+        } catch (retryError) {
+          console.error('AuthService.withAuth: Retry failed:', retryError);
+          // Fall through to handle as regular error
+        }
+      }
+      
+      // Handle auth errors
       if (
         error.message?.includes('401') ||
         error.message?.includes('Unauthorized') ||
@@ -517,6 +617,16 @@ class AuthService {
           throw new Error('Session expired. Please login again.');
         }
       }
+      
+      // For retryable errors that failed retry, provide user-friendly message
+      if (isRetryable) {
+        throw new AuthError(
+          'Service temporarily unavailable. Please try again in a moment.',
+          'SERVICE_UNAVAILABLE',
+          error.statusCode || 500
+        );
+      }
+      
       throw error;
     }
   }

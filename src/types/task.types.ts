@@ -6,9 +6,10 @@ export type TaskCategory = 'general' | 'project' | 'maintenance' | 'emergency' |
 export interface TaskAssignee {
   id: string;
   name: string;
-  avatar: string;
-  role: string;
   email: string;
+  avatar_url?: string;
+  role: string;
+  phone?: string;
 }
 
 export interface TaskComment {
@@ -70,7 +71,7 @@ export interface Task {
   priority: TaskPriority;
   task_type: TaskType;
   channel_id?: string;
-  channel_name?: string;
+  parent_task_id?: string; // Backend field for subtasks
   assigned_to: string[];
   created_by: string;
   owned_by?: string;
@@ -91,19 +92,19 @@ export interface Task {
   business_value: 'low' | 'medium' | 'high' | 'critical';
   labels: Record<string, any>;
   custom_fields: Record<string, any>;
-  // Legacy fields for compatibility
-  assignees?: TaskAssignee[];
-  reporter?: TaskAssignee;
-  channelId?: string;
-  channelName?: string;
-  dueDate?: Date;
-  createdAt?: Date;
-  updatedAt?: Date;
-  completedAt?: Date;
-  estimatedHours?: number;
-  actualHours?: number;
-  progress?: number;
-  category?: string;
+  acceptance_criteria?: string; // Backend field
+  story_points?: number; // Backend field
+  // Computed fields from backend joins
+  assignee_details?: TaskAssignee[];
+  owner_name?: string;
+  channel_name?: string;
+  subtask_count?: number;
+  dependency_count?: number;
+  comments_count: number;
+  attachments_count: number;
+  last_activity_at: Date | string;
+  version?: number; // Backend versioning field
+  // Frontend-only fields for compatibility
   subtasks: TaskSubtask[];
   comments: TaskComment[];
   attachments: TaskAttachment[];
@@ -114,21 +115,20 @@ export interface TaskFilter {
   status?: TaskStatus[];
   priority?: TaskPriority[];
   task_type?: TaskType[];
-  assignedTo?: string[];
-  channelId?: string;
-  dueAfter?: Date;
-  dueBefore?: Date;
+  assigned_to?: string[];
+  assignee?: string[]; // Alias for assigned_to for legacy support
+  channel_id?: string;
+  channel?: string[]; // Alias for channel_id
+  due_after?: Date;
+  due_before?: Date;
+  dueDate?: { from?: Date; to?: Date }; // Alternative date filter format
   tags?: string[];
-  voiceCreated?: boolean;
+  voice_created?: boolean;
+  voiceCreated?: boolean; // Alias for voice_created
   overdue?: boolean;
-  // Legacy fields for compatibility
-  category?: string[];
-  assignee?: string[];
-  channel?: string[];
-  dueDate?: {
-    from?: Date;
-    to?: Date;
-  };
+  search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface TaskSort {
@@ -187,16 +187,16 @@ export interface TaskActivity {
 export interface CreateTaskData {
   title: string;
   description?: string;
-  channel_id?: string;
-  created_by: string;
+  channel_id: string; // Required - every task must belong to a channel
+  parent_task_id?: string;
   assigned_to?: string[];
   owned_by?: string;
   priority?: TaskPriority;
   task_type?: TaskType;
   complexity?: number;
   estimated_hours?: number;
-  due_date?: Date;
-  start_date?: Date;
+  due_date?: Date | string;
+  start_date?: Date | string;
   tags?: string[];
   labels?: Record<string, any>;
   voice_created?: boolean;
@@ -204,13 +204,6 @@ export interface CreateTaskData {
   voice_instructions?: string;
   business_value?: 'low' | 'medium' | 'high' | 'critical';
   acceptance_criteria?: string;
-  // Legacy fields for compatibility
-  priority_legacy?: TaskPriority;
-  category?: string;
-  assignees?: string[];
-  channelId?: string;
-  dueDate?: Date;
-  estimatedHours?: number;
 }
 
 export interface UpdateTaskData {
@@ -218,12 +211,15 @@ export interface UpdateTaskData {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
-  category?: TaskCategory;
-  assignees?: string[];
-  channelId?: string;
+  task_type?: TaskType;
+  assigned_to?: string[];
+  channel_id?: string;
   tags?: string[];
-  dueDate?: Date;
-  estimatedHours?: number;
-  actualHours?: number;
-  progress?: number;
+  due_date?: Date | string;
+  estimated_hours?: number;
+  actual_hours?: number;
+  progress_percentage?: number;
+  complexity?: number;
+  business_value?: 'low' | 'medium' | 'high' | 'critical';
+  acceptance_criteria?: string;
 }

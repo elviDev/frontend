@@ -12,11 +12,14 @@ import { channelService, type Channel as ApiChannel, type ChannelCategory } from
 import { userService } from '../../services/api/userService';
 import { AuthError } from '../../services/api/authService';
 import { useAuth } from '../../hooks/useAuth';
+import { useAuthorization } from '../../contexts/AuthorizationContext';
 import { ChannelCard, ConfirmationModal, ActionSheet } from '../../components/common';
 import { CreateChannelModal } from '../../components/channel/CreateChannelModal';
 import { MemberSelectorModal } from '../../components/channel/MemberSelectorModal';
 import { CategoryFilterModal } from '../../components/channel/CategoryFilterModal';
 import { useAppTranslation } from '../../hooks/useAppTranslation';
+import { useWebSocket } from '../../services/websocketService';
+import { Channel } from '../../types/project';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -31,7 +34,7 @@ interface Member {
   job_title?: string;
 }
 
-interface Channel {
+interface DisplayChannel {
   id: string;
   title: string;
   description: string;
@@ -46,53 +49,29 @@ interface Channel {
   createdAt: Date;
 }
 
-interface DisplayChannel extends Channel {}
-
 interface Category extends ChannelCategory {
   count: number; // Channel count per category - will be calculated from actual channels
 }
 
-// Map channel_type to category IDs
+// Direct mapping from backend channel types to categories (simplified)
 const CHANNEL_TYPE_TO_CATEGORY_MAP: Record<string, string> = {
   'department': 'department',
   'project': 'project', 
-  'initiative': 'project', // initiatives are project-like
+  'initiative': 'project',
   'announcement': 'announcement',
   'temporary': 'general',
-  'emergency': 'general',
-  'general': 'general',
-  'private': 'private'
+  'general': 'general'
 };
 
-// Map API channel to display channel with enhanced statistics
-const mapApiChannelToDisplayChannel = (apiChannel: ApiChannel, stats?: {
-  messageCount: number;
-  fileCount: number;
-  members: Member[];
-}): Channel => {
-return  ({
-    id: apiChannel.id,
-    title: apiChannel.name,
-    description: apiChannel.description || '',
-    category: apiChannel.channel_type || 'general',
-    tags: apiChannel.project_info.tags, // Tags would need to be implemented in the API
-    members: stats?.members || [], // Members from API
-    memberAvatars:
-      stats?.members?.map(m => m.avatar || m.name?.charAt(0) || '?') || [], // URLs if available, otherwise initials
-    messages: stats?.messageCount || 0, // Actual message count from API
-    files: stats?.fileCount || 0, // Actual file count from API
-    memberCount: apiChannel.member_count || stats?.members?.length || 0,
-    privacy: apiChannel.privacy_level || 'public',
-    createdAt: new Date(apiChannel.created_at),
-  });
-}
-
-export const ChannelsScreen: React.FC<{ navigation: any }> = ({
+export const ChannelsScreen: React.FC<{ navigation: any; route?: any }> = ({
   navigation,
+  route,
 }) => {
   const { common, channels: channelTr } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { canCreateChannels, canAccessResource } = useAuthorization();
+  const { on, off, isConnected } = useWebSocket();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,7 +81,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channels, setChannels] = useState<DisplayChannel[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [availableMembers, setAvailableMembers] = useState<Member[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
@@ -139,13 +118,31 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   
   const { showError, showSuccess, showWarning } = useToast();
 
-  // Load available members from API
+  // Debug: Log when component re-renders
+  console.log(`🔄 ChannelsScreen render: ${channels.length} channels, ${filteredChannels?.length || 0} filtered`);
+
+  // Load available members from API (only for users with channel creation permissions)
   const loadAvailableMembers = useCallback(async () => {
-    // Use functional update to check loading state without adding to dependencies
-    setLoadingMembers(current => {
-      if (current) return current; // Already loading, don't start another request
-      return true; // Start loading
-    });
+    // Check if user has permission to load members
+    if (!canCreateChannels()) {
+      console.log('User does not have permission to load member list');
+      setAvailableMembers([]);
+      return;
+    }
+
+    // Prevent multiple concurrent requests
+    if (loadingMembers) {
+      console.log('Already loading members, skipping duplicate request');
+      return;
+    }
+
+    // If we already have members loaded, don't reload unless necessary
+    if (availableMembers.length > 0) {
+      console.log('Members already loaded, skipping duplicate request');
+      return;
+    }
+
+    setLoadingMembers(true);
     
     try {
       // Get current user first to include them in the list
@@ -179,16 +176,22 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       console.error('Failed to load available members:', error);
       // Set empty state when unable to load members
       setAvailableMembers([]);
-      // Use functional update to avoid dependency
-      showError('Unable to load team members. Please try again later.');
+      
+      // Handle 403 errors specifically for unauthorized access
+      if (error instanceof AuthError && error.message.includes('403')) {
+        console.log('User does not have permission to view user list (403 Forbidden)');
+        // Don't show error toast for permission issues - this is expected for staff
+      } else {
+        showError('Unable to load team members. Please try again later.');
+      }
     } finally {
       setLoadingMembers(false);
     }
-  }, []); // Remove showWarning dependency
+  }, [canCreateChannels, showError, loadingMembers, availableMembers.length]);
 
   // Categories
   // Load categories from API
-  const loadCategories = useCallback(async (channelList?: Channel[]) => {
+  const loadCategories = useCallback(async (channelList?: DisplayChannel[]) => {
     try {
       const apiCategories = await channelService.getChannelCategories();
       
@@ -211,8 +214,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
 
   // Load channels function
   const loadChannels = useCallback(async (showLoadingSpinner: boolean = true) => {
-    // Prevent multiple concurrent requests
-    if (loading && showLoadingSpinner) {
+    // Prevent multiple concurrent requests (but allow refresh)
+    if (loading && !refreshing) {
+      console.log('Already loading channels, skipping duplicate request');
       return;
     }
     
@@ -225,49 +229,46 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       try {
         const apiChannelsWithStats = await channelService.getChannelsWithStats();
         
-        // Use member_details from API response directly with error boundary protection
-        const displayChannels: Channel[] = apiChannelsWithStats.map((apiChannel) => {
-          try {
-            // Use member_details from the API response with proper null checks
-            const members: Member[] = apiChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
-              id: memberDetail?.id || 'unknown',
-              name: memberDetail?.name || 'Unknown User',
-              avatar: memberDetail?.avatar_url || memberDetail?.name?.charAt(0)?.toUpperCase() || '?',
-              role: memberDetail?.role || 'Member',
-              email: memberDetail?.email,
-              department: memberDetail?.department,
-              job_title: memberDetail?.job_title,
-            })).filter(member => member.id !== 'unknown') || [];
+        // Convert API channels to display format directly (simplified)
+        const displayChannels: DisplayChannel[] = apiChannelsWithStats.map((apiChannel) => {
+          // Use member_details from the API response with proper null checks
+          const members: Member[] = apiChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
+            id: memberDetail?.id || 'unknown',
+            name: memberDetail?.name || 'Unknown User',
+            avatar: memberDetail?.avatar_url || memberDetail?.name?.charAt(0)?.toUpperCase() || '?',
+            role: memberDetail?.role || 'Member',
+            email: memberDetail?.email,
+            department: memberDetail?.department,
+            job_title: memberDetail?.job_title,
+          })).filter(member => member.id !== 'unknown') || [];
 
-            return mapApiChannelToDisplayChannel(apiChannel, {
-              messageCount: apiChannel.messageCount || 0,
-              fileCount: apiChannel.fileCount || 0,
-              members,
-            });
-          } catch (channelMappingError) {
-            console.warn('Failed to map channel data:', {
-              channelId: apiChannel?.id,
-              error: channelMappingError
-            });
-            // Return a safe default channel object for malformed data
-            return {
-              id: apiChannel?.id || 'error-channel',
-              title: apiChannel?.name || 'Unknown Channel',
-              description: 'Error loading channel data',
-              category: 'general',
-              tags: [],
-              members: [],
-              memberAvatars: [],
-              messages: 0,
-              files: 0,
-              memberCount: 0,
-              privacy: 'public' as const,
-              createdAt: new Date(),
-            };
-          }
-        }).filter(channel => channel.id !== 'error-channel');
+          // Direct conversion without unnecessary mapping layer
+          return {
+            id: apiChannel.id,
+            title: apiChannel.name,
+            description: apiChannel.description || '',
+            category: apiChannel.channel_type || 'general',
+            tags: apiChannel.project_info?.tags || [],
+            members,
+            memberAvatars: members.map(m => m.avatar),
+            messages: apiChannel.messageCount || 0,
+            files: apiChannel.fileCount || 0,
+            memberCount: apiChannel.member_count || members.length,
+            privacy: apiChannel.privacy_level || 'public',
+            createdAt: new Date(apiChannel.created_at),
+          };
+        });
+
+        console.log(`Loaded ${displayChannels.length} channels from API`);
+        console.log(`📊 Channel details:`, displayChannels.map(c => ({
+          title: c.title,
+          memberCount: c.memberCount,
+          membersArray: c.members.map(m => ({ id: m.id, name: m.name })),
+          privacy: c.privacy
+        })));
         
         setChannels(displayChannels);
+        console.log(`🔄 State updated with ${displayChannels.length} channels`);
         // Update categories with the new channel list immediately
         await loadCategories(displayChannels);
       } catch (apiError) {
@@ -284,19 +285,21 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       setLoading(false);
       setRefreshing(false);
     }
-  }, []); // No dependencies to prevent re-renders - functions are stable
+  }, [loading, refreshing]); // Add loading and refreshing dependencies to prevent concurrent requests
 
   // Load categories after channels are loaded - removed this useEffect to prevent circular dependency
   // Categories are now loaded directly in loadChannels function
 
-  // Load available members on component mount
+  // Load available members on component mount (only for users who can create channels)
   useEffect(() => {
-    loadAvailableMembers();
-  }, [loadAvailableMembers]);
+    if (canCreateChannels()) {
+      loadAvailableMembers();
+    }
+  }, [canCreateChannels]); // Removed loadAvailableMembers dependency to prevent re-execution
 
-  // Initialize form with current user as member when available
+  // Initialize form with current user as member when available (only for users who can create channels)
   useEffect(() => {
-    if (showCreateChannel && formData.members.length === 0 && availableMembers.length > 0 && user?.id) {
+    if (canCreateChannels() && showCreateChannel && formData.members.length === 0 && availableMembers.length > 0 && user?.id) {
       const currentUserMember = availableMembers.find(member => member.id === user.id);
       if (currentUserMember) {
         setFormData(prev => ({
@@ -305,12 +308,242 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         }));
       }
     }
-  }, [showCreateChannel, availableMembers, formData.members.length, user?.id]);
+  }, [canCreateChannels, showCreateChannel, availableMembers, formData.members.length, user?.id]);
 
   // Load channels on component mount
   useEffect(() => {
+    console.log('ChannelsScreen mounted, loading channels...');
     loadChannels();
-  }, [loadChannels]);
+  }, []); // Removed loadChannels dependency to prevent re-execution
+
+  // Check route params for auto-opening create modal
+  useEffect(() => {
+    if (route?.params?.openCreateModal && canCreateChannels()) {
+      setShowCreateChannel(true);
+      // Clear the param to prevent reopening on subsequent navigations
+      navigation.setParams({ openCreateModal: undefined });
+    }
+  }, [route?.params?.openCreateModal, canCreateChannels]);
+
+  // WebSocket event listeners for real-time channel updates
+  useEffect(() => {
+    if (!isConnected) return;
+
+    let unsubscribeFunctions: Array<() => void> = [];
+
+    // Handle channel updated events
+    const unsubscribeChannelUpdated = on('channel_updated', (event: any) => {
+      console.log('Channel updated via websocket:', event);
+      
+      // Backend sends: { type, channelId, data: { type, channelId, updates, userId, userName, userRole, timestamp }, timestamp }
+      const channelId = event.channelId;
+      const updates = event.data?.updates;
+      
+      if (!channelId || !updates) {
+        console.warn('Invalid channel_updated event structure:', event);
+        return;
+      }
+      
+      setChannels(prevChannels => 
+        prevChannels.map(channel => 
+          channel.id === channelId 
+            ? { 
+                ...channel,
+                // Map backend fields to frontend DisplayChannel structure
+                title: updates.name || channel.title,
+                description: updates.description !== undefined ? updates.description : channel.description,
+                category: updates.type || channel.category,
+                privacy: updates.privacy || channel.privacy,
+                tags: updates.tags || channel.tags,
+              }
+            : channel
+        )
+      );
+    });
+    unsubscribeFunctions.push(unsubscribeChannelUpdated);
+
+    // Handle channel deleted events
+    const unsubscribeChannelDeleted = on('channel_deleted', (event: any) => {
+      console.log('Channel deleted via websocket:', event);
+      
+      // Backend sends: { type, channelId, data: { type, channelId, userId, userName, userRole, timestamp }, timestamp }
+      const channelId = event.channelId;
+      
+      if (!channelId) {
+        console.warn('Invalid channel_deleted event structure:', event);
+        return;
+      }
+      
+      setChannels(prevChannels => 
+        prevChannels.filter(channel => channel.id !== channelId)
+      );
+      showWarning('Channel has been deleted');
+    });
+    unsubscribeFunctions.push(unsubscribeChannelDeleted);
+
+    // Handle user joined channel events
+    const unsubscribeUserJoined = on('user_joined_channel', (event: any) => {
+      console.log('🎉 User joined channel via websocket:', event);
+      
+      // Handle both direct events and wrapped events
+      const channelId = event.channelId || event.data?.channelId;
+      const memberCount = event.memberCount || event.data?.memberCount;
+      
+      if (!channelId) {
+        console.warn('❌ Invalid user_joined_channel event structure:', event);
+        return;
+      }
+      
+      setChannels(prevChannels => {
+        const updatedChannels = prevChannels.map(channel => {
+          if (channel.id === channelId) {
+            const newMemberCount = memberCount !== undefined ? memberCount : channel.memberCount + 1;
+            console.log(`📊 Updating channel ${channelId} member count: ${channel.memberCount} → ${newMemberCount}`);
+            return { ...channel, memberCount: newMemberCount };
+          }
+          return channel;
+        });
+        return updatedChannels;
+      });
+    });
+    unsubscribeFunctions.push(unsubscribeUserJoined);
+
+    // Handle user left channel events - differentiate between disconnection and actual removal
+    const unsubscribeUserLeft = on('user_left_channel', (event: any) => {
+      const userId = event.userId || event.data?.userId;
+      const channelId = event.channelId || event.data?.channelId;
+      const memberCount = event.memberCount || event.data?.memberCount;
+      const eventType = event.type || event.data?.type;
+      const reason = event.reason || event.data?.reason;
+      
+      if (!channelId) {
+        console.warn('Invalid user_left_channel event structure:', event);
+        return;
+      }
+
+      // Check if this is a temporary disconnection vs permanent removal
+      const isTemporaryDisconnection = eventType === 'user_disconnected_from_channel' || reason === 'disconnected';
+
+      if (userId === user?.id) {
+        if (isTemporaryDisconnection) {
+          // For temporary disconnections, don't remove the channel, just log it
+          console.log('🔌 Current user temporarily disconnected from channel WebSocket, keeping channel in list');
+          // Optionally update member count to reflect disconnection
+          setChannels(prevChannels => 
+            prevChannels.map(channel => 
+              channel.id === channelId 
+                ? { ...channel, memberCount: memberCount !== undefined ? memberCount : Math.max(0, channel.memberCount - 1) }
+                : channel
+            )
+          );
+        } else {
+          // For actual removals, remove the channel from their list
+          console.log('😢 Current user was removed from channel, removing from list');
+          setChannels(prevChannels => {
+            const filteredChannels = prevChannels.filter(channel => channel.id !== channelId);
+            console.log(`🗑️ Removed channel ${channelId}, ${prevChannels.length} -> ${filteredChannels.length} channels`);
+            return filteredChannels;
+          });
+          showWarning('You have been removed from a channel');
+        }
+      } else {
+        // For other users leaving/disconnecting, just update the member count
+        console.log('👋 Other user left/disconnected from channel via websocket:', event);
+        setChannels(prevChannels => 
+          prevChannels.map(channel => 
+            channel.id === channelId 
+              ? { ...channel, memberCount: memberCount !== undefined ? memberCount : Math.max(0, channel.memberCount - 1) }
+              : channel
+          )
+        );
+      }
+    });
+    unsubscribeFunctions.push(unsubscribeUserLeft);
+
+    // Handle channel created events
+    const unsubscribeChannelCreated = on('channel_created', (event: any) => {
+      console.log('Channel created via websocket:', event);
+      
+      // Backend sends: { type, channelId, channel, userId, userName, userRole, timestamp }
+      const newChannel = event.channel;
+      
+      if (!newChannel) {
+        console.warn('Invalid channel_created event structure:', event);
+        return;
+      }
+      
+      // Convert API channel to display format
+      const members: Member[] = newChannel.member_details?.slice(0, 10)?.map((memberDetail: any) => ({
+        id: memberDetail?.id || 'unknown',
+        name: memberDetail?.name || 'Unknown User',
+        avatar: memberDetail?.avatar_url || memberDetail?.name?.charAt(0)?.toUpperCase() || '?',
+        role: memberDetail?.role || 'Member',
+        email: memberDetail?.email,
+        department: memberDetail?.department,
+        job_title: memberDetail?.job_title,
+      })).filter((member: any) => member.id !== 'unknown') || [];
+
+      const displayChannel: DisplayChannel = {
+        id: newChannel.id,
+        title: newChannel.name,
+        description: newChannel.description || '',
+        category: newChannel.channel_type || 'general',
+        tags: newChannel.project_info?.tags || [],
+        members,
+        memberAvatars: members.map(m => m.avatar),
+        messages: 0,
+        files: 0,
+        memberCount: newChannel.member_count || members.length,
+        privacy: newChannel.privacy_level || 'public',
+        createdAt: new Date(newChannel.created_at),
+      };
+      
+      // Add new channel to the beginning of the list
+      setChannels(prevChannels => [displayChannel, ...prevChannels]);
+      showSuccess(`New channel "${newChannel.name}" created`);
+    });
+    unsubscribeFunctions.push(unsubscribeChannelCreated);
+
+    // Handle notification events for member additions and channel updates
+    const unsubscribeNotification = on('notification', (event: any) => {
+      console.log('📢 Notification received:', event);
+      
+      // Check if this is a member_added, member_removed, or channel_updated notification
+      if (event.activity?.type === 'member_added' || 
+          event.activity?.type === 'member_removed' ||
+          event.activity?.type === 'channel_updated' ||
+          (event.type === 'activity_notification' && 
+           (event.activity?.type === 'member_added' || 
+            event.activity?.type === 'member_removed' ||
+            event.activity?.type === 'channel_updated'))) {
+        console.log('👥 Member/channel update notification received, triggering refresh');
+        // Use setRefreshing to trigger a refresh without calling loadChannels directly
+        setTimeout(() => {
+          setRefreshing(true);
+        }, 500);
+      }
+    });
+    unsubscribeFunctions.push(unsubscribeNotification);
+
+    return () => {
+      console.log('🧹 Cleaning up WebSocket event listeners');
+      unsubscribeFunctions.forEach((unsubscribe, index) => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.warn(`Error unsubscribing from WebSocket event ${index}:`, error);
+        }
+      });
+    };
+  }, [isConnected, user?.id]); // Removed 'on' and 'loadChannels' from dependencies to prevent infinite loop
+
+  // Handle programmatic refresh triggers
+  useEffect(() => {
+    if (refreshing && !loading) {
+      console.log('🔄 Programmatic refresh triggered, loading channels...');
+      loadChannels(false);
+    }
+  }, [refreshing, loading]); // Trigger loadChannels when refreshing is set to true
 
   // Debounce search query
   useEffect(() => {
@@ -334,9 +567,38 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     setSearchQuery(text);
   }, []);
 
-  // Filter channels based on debounced search query and selected categories
+  // Filter channels based on user role, membership, search query and selected categories
   const filteredChannels = useMemo(() => {
     let filtered = channels;
+    console.log(`🔍 Starting filter with ${channels.length} channels`, { 
+      userRole: user?.role, 
+      userId: user?.id,
+      channelTitles: channels.map(c => c.title)
+    });
+
+    // Apply role-based filtering first
+    if (user?.role === 'staff') {
+      // Staff can only see channels they are members of
+      filtered = filtered.filter(channel => {
+        const isMember = channel.members.some(member => member.id === user.id);
+        const isPublicAnnouncement = (channel.privacy === 'public' && channel.category === 'announcement');
+        const shouldShow = isMember || isPublicAnnouncement;
+        console.log(`📋 Staff filter for "${channel.title}": isMember=${isMember}, isPublicAnnouncement=${isPublicAnnouncement}, shouldShow=${shouldShow}`);
+        return shouldShow;
+      });
+    } else if (user?.role === 'manager') {
+      // Managers can see all public channels + channels they're members of + restricted channels for their role
+      filtered = filtered.filter(channel => {
+        const isPublic = channel.privacy === 'public';
+        const isMember = channel.members.some(member => member.id === user.id);
+        const isRestricted = channel.privacy === 'restricted';
+        const shouldShow = isPublic || isMember || isRestricted;
+        console.log(`👔 Manager filter for "${channel.title}": isPublic=${isPublic}, isMember=${isMember}, isRestricted=${isRestricted}, shouldShow=${shouldShow}`);
+        return shouldShow;
+      });
+    }
+    // CEOs can see all channels (no filtering needed)
+    console.log(`🎯 After role filtering: ${filtered.length} channels remaining`);
 
     // Filter by selected categories
     if (selectedCategories.length > 0) {
@@ -358,8 +620,11 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       );
     }
 
+    console.log(`✅ Final filtered result: ${filtered.length} channels`, {
+      finalChannels: filtered.map(c => ({ title: c.title, privacy: c.privacy, memberCount: c.members.length }))
+    });
     return filtered;
-  }, [channels, debouncedSearchQuery, selectedCategories]);
+  }, [channels, debouncedSearchQuery, selectedCategories, user?.role, user?.id]);
 
   // Form validation
   const validateForm = () => {
@@ -416,6 +681,15 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
 
     setSubmittingChannel(true);
 
+    // Set timeout to prevent modal from hanging indefinitely
+    const timeoutId = setTimeout(() => {
+      if (submittingChannel) {
+        console.warn('Channel update timeout, clearing loading state');
+        setSubmittingChannel(false);
+        showError('Request timed out. The changes may have been saved. Please refresh to see latest data.');
+      }
+    }, 65000); // 65 second timeout (slightly more than API timeout)
+
     try {
       const channelData = {
         name: formData.name.trim(),
@@ -426,20 +700,29 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         tags: formData.tags,
         ...(formData.color && { color: formData.color }),
         settings: formData.settings,
+        members: formData.members, // Include members for backend processing
       };
 
       if (isEditMode && editingChannelId) {
         // Edit existing channel
         await channelService.updateChannel(editingChannelId, channelData);
         showSuccess(`${channelTr.channelUpdated()}: "${formData.name}"`);
+        
+        // Refresh channels list for updates (WebSocket handles member changes, but not all field updates)
+        await loadChannels(false);
       } else {
         // Create new channel
         await channelService.createChannel(channelData);
         showSuccess(`${channelTr.channelCreated()}: "${formData.name}"`);
+        
+        // No need to refresh for creation - WebSocket event will add the new channel
       }
       
-      // Refresh channels list
-      await loadChannels(false);
+      // Clear the timeout since operation completed successfully
+      clearTimeout(timeoutId);
+      
+      // Clear loading state immediately after successful operation
+      setSubmittingChannel(false);
       
       // Close modal first, then reset form to prevent UI flicker
       setShowCreateChannel(false);
@@ -450,6 +733,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       }, 100);
       
     } catch (error) {
+      // Clear the timeout since operation completed (with error)
+      clearTimeout(timeoutId);
       console.error(`Failed to ${isEditMode ? 'update' : 'create'} channel:`, {
         error: error instanceof Error ? error.message : error,
         formData,
@@ -459,6 +744,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
           type: formData.type,
           privacy: formData.privacy,
           tags: formData.tags,
+          memberCount: formData.members.length,
         }
       });
       
@@ -469,13 +755,14 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       } else {
         showError(`Failed to ${isEditMode ? 'update' : 'create'} channel. Please try again.`);
       }
-    } finally {
+      
+      // Clear loading state on error
       setSubmittingChannel(false);
     }
   };
 
   // Start editing a channel
-  const startEditChannel = (channel: Channel) => {
+  const startEditChannel = (channel: DisplayChannel) => {
     setIsEditMode(true);
     setEditingChannelId(channel.id);
     setFormData({
@@ -523,13 +810,32 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     }));
   }, []);
 
-  const handleChannelPress = (channel: Channel) => {
+  const handleChannelPress = (channel: DisplayChannel) => {
     console.log(
       'Navigating to channel:',
       channel.title,
       'with members:',
       channel.members,
     );
+
+    // Check channel membership before navigation (like requireChannelMembership middleware)
+    if (user) {
+      // CEO can access any channel
+      if (user.role !== 'ceo') {
+        // Channel creator can access their own channel
+        if (channel.created_by !== user.id) {
+          // Check if user is explicitly a member
+          const isMember = channel.members?.some(member => 
+            typeof member === 'string' ? member === user.id : member.id === user.id
+          ) || false;
+
+          if (!isMember) {
+            showError('You must be a member to access this channel. Contact the CEO to be added to this channel');
+            return;
+          }
+        }
+      }
+    }
 
     try {
       // Alternative navigation methods to try if one doesn't work
@@ -574,7 +880,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     setShowActionSheet(true);
   };
 
-  const handleDeleteChannel = (channel: Channel) => {
+  const handleDeleteChannel = (channel: DisplayChannel) => {
     setSelectedChannelForAction(channel);
     setShowDeleteConfirmation(true);
   };
@@ -588,7 +894,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       await channelService.deleteChannel(selectedChannelForAction.id);
       showSuccess(`Channel "${selectedChannelForAction.title}" deleted successfully`);
       
-      // Refresh channels list
+      // Refresh channels list after deletion
       await loadChannels(false);
     } catch (error) {
       console.error('Failed to delete channel:', error);
@@ -604,7 +910,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     }
   };
 
-  const handleEditChannel = (channel: Channel) => {
+  const handleEditChannel = (channel: DisplayChannel) => {
     startEditChannel(channel);
   };
 
@@ -612,15 +918,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
   const actionSheetOptions = useMemo(() => {
     if (!selectedChannelForAction) return [];
     
-    // Check if user can edit (CEO, channel owner, or channel admin)
-    const canEdit = user?.role === 'ceo' || 
-                   selectedChannelForAction.members.some(m => 
-                     m.id === user?.id && (m.role === 'owner' || m.role === 'admin'));
-    
-    // Check if user can delete (CEO or channel owner only)
-    const canDelete = user?.role === 'ceo' || 
-                     selectedChannelForAction.members.some(m => 
-                       m.id === user?.id && m.role === 'owner');
+    // Use proper authorization based on backend permissions
+    const canEdit = canAccessResource('channels', 'update');
+    const canDelete = canAccessResource('channels', 'delete');
     
     const options: Array<{
       text: string;
@@ -634,7 +934,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     const channelRef = selectedChannelForAction;
     
     // Add edit option if user has permission
-    if (canEdit) {
+    // For public channels, only CEOs can edit
+    if (canEdit && (channelRef.privacy !== 'public' || user?.role === 'ceo')) {
       options.push({
         text: channelTr.editChannel(),
         icon: 'edit',
@@ -647,7 +948,8 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     }
     
     // Add delete option if user has permission
-    if (canDelete) {
+    // For public channels, only CEOs can delete
+    if (canDelete && (channelRef.privacy !== 'public' || user?.role === 'ceo')) {
       options.push({
         text: channelTr.deleteChannel(),
         icon: 'delete',
@@ -681,11 +983,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
     });
     
     return options;
-  }, [selectedChannelForAction, user?.role, user?.id, channelTr, common]);
+  }, [selectedChannelForAction, canAccessResource, channelTr, common]);
 
 
-
-    console.log("Visible Actions",showActionSheet, selectedChannelForAction?.id, actionSheetOptions);
   // Removed console.log to improve performance
   return (
     <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
@@ -711,13 +1011,15 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
           >
             <IonIcon name="filter-outline" size={22} color="#6B7280" />
           </AnimatedTouchableOpacity>
-          <AnimatedTouchableOpacity
-            entering={FadeInUp.delay(700).duration(400).springify()}
-            onPress={() => setShowCreateChannel(true)}
-            className="bg-purple-600 rounded-xl p-3 shadow-lg"
-          >
-            <Feather name="plus" size={22} color="white" />
-          </AnimatedTouchableOpacity>
+          {canCreateChannels() && (
+            <AnimatedTouchableOpacity
+              entering={FadeInUp.delay(700).duration(400).springify()}
+              onPress={() => setShowCreateChannel(true)}
+              className="bg-purple-600 rounded-xl p-3 shadow-lg"
+            >
+              <Feather name="plus" size={22} color="white" />
+            </AnimatedTouchableOpacity>
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -802,7 +1104,7 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
             className="mt-3"
           >
             <Text className="text-gray-600 text-sm">
-              {filteredChannels.length > 0
+              {filteredChannels && filteredChannels.length > 0
                 ? `${filteredChannels.length} ${channelTr.channelsFound(filteredChannels.length)}`
                 : 'No channels found'}
             </Text>
@@ -824,6 +1126,9 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
       ) : (
         <ScrollView
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
+          removeClippedSubviews={false}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -836,27 +1141,41 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
             />
           }
         >
-          <Animated.View entering={FadeInUp.delay(800).duration(600)}>
-            {filteredChannels.length > 0 ? (
-              filteredChannels.map((channel, index) => (
-                <ChannelCard
-                  key={channel.id}
-                  title={channel.title}
-                  description={channel.description}
-                  category={channel.category}
-                  tags={channel.tags}
-                  memberAvatars={channel.memberAvatars}
-                  memberList={channel.members}
-                  messages={channel.messages}
-                  files={channel.files}
-                  members={channel.memberCount}
-                  isPrivate={channel.privacy !== 'public'}
-                  index={index}
-                  onPress={() => handleChannelPress(channel)}
-                  onOptionsPress={() => handleChannelOptions(channel)}
-                />
-              ))
-            ) : searchQuery.trim() || selectedCategories.length > 0 ? (
+          {(() => {
+            console.log(`🎨 Rendering ${filteredChannels?.length || 0} channels in UI`);
+            return filteredChannels && filteredChannels.length > 0 ? (
+              <View key={`channel-list-${filteredChannels.length}`}>
+                {filteredChannels.map((channel, index) => {
+                  console.log(`🔹 Rendering channel ${index + 1}: "${channel.title}"`);
+                  return (
+                    <Animated.View
+                      key={channel.id}
+                      entering={FadeInUp.delay(index * 50).duration(400)}
+                      style={{ marginBottom: 16, marginHorizontal: 16 }}
+                    >
+                      <ChannelCard
+                        title={channel.title}
+                        description={channel.description}
+                        category={channel.category}
+                        tags={channel.tags}
+                        memberAvatars={channel.memberAvatars}
+                        memberList={channel.members}
+                        messages={channel.messages}
+                        files={channel.files}
+                        members={channel.memberCount}
+                        isPrivate={channel.privacy !== 'public'}
+                        privacy={channel.privacy}
+                        index={index}
+                        onPress={() => handleChannelPress(channel)}
+                        onOptionsPress={() => handleChannelOptions(channel)}
+                      />
+                    </Animated.View>
+                  );
+                })}
+              </View>
+            ) : null;
+          })()}
+            {filteredChannels && filteredChannels.length === 0 && (searchQuery.trim() || selectedCategories.length > 0) ? (
               <Animated.View
                 entering={FadeInUp.delay(400).duration(600)}
                 className="flex-1 items-center justify-center py-12"
@@ -878,10 +1197,13 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
                   No channels found
                 </Text>
                 <Text className="text-gray-400 text-sm text-center px-8">
-                  Try searching with different keywords or adjusting filters
+                  {user?.role === 'staff' 
+                    ? 'No accessible channels match your search. You can only see channels you\'re a member of.'
+                    : 'Try searching with different keywords or adjusting filters'
+                  }
                 </Text>
               </Animated.View>
-            ) : (
+            ) : (!filteredChannels || filteredChannels.length === 0) ? (
               <Animated.View
                 entering={FadeInUp.delay(400).duration(600)}
                 className="flex-1 items-center justify-center py-12"
@@ -900,20 +1222,26 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
                   <Feather name="plus" size={32} color="#9CA3AF" />
                 </View>
                 <Text className="text-gray-500 text-lg font-medium mb-2">
-                  No channels yet
+                  {user?.role === 'staff' ? 'No channels assigned' : 'No channels yet'}
                 </Text>
                 <Text className="text-gray-400 text-sm text-center px-8 mb-4">
-                  Create your first channel to start collaborating with your team
+                  {user?.role === 'staff' 
+                    ? "You haven't been added to any channels yet. Contact your manager to be added to relevant channels."
+                    : canCreateChannels() 
+                      ? 'Create your first channel to start collaborating with your team' 
+                      : 'No channels are available to you at this time'
+                  }
                 </Text>
-                <TouchableOpacity
-                  onPress={() => setShowCreateChannel(true)}
-                  className="bg-purple-600 rounded-xl px-6 py-3"
-                >
-                  <Text className="text-white font-medium">Create Channel</Text>
-                </TouchableOpacity>
+                {canCreateChannels() && (
+                  <TouchableOpacity
+                    onPress={() => setShowCreateChannel(true)}
+                    className="bg-purple-600 rounded-xl px-6 py-3"
+                  >
+                    <Text className="text-white font-medium">Create Channel</Text>
+                  </TouchableOpacity>
+                )}
               </Animated.View>
-            )}
-          </Animated.View>
+            ) : null}
         </ScrollView>
       )}
 
@@ -933,19 +1261,23 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         onClearAll={() => setSelectedCategories([])}
       />
 
-      {/* Create Channel Modal */}
-      <CreateChannelModal
-        visible={showCreateChannel}
-        onClose={() => {
-          resetForm();
-          setShowCreateChannel(false);
-        }}
+      {/* Create Channel Modal - Only show for users with create permissions */}
+      {canCreateChannels() && (
+        <CreateChannelModal
+          visible={showCreateChannel}
+          onClose={() => {
+            // Force clear loading state to allow modal to close
+            setSubmittingChannel(false);
+            resetForm();
+            setShowCreateChannel(false);
+          }}
         isEditMode={isEditMode}
         formData={formData}
         formErrors={formErrors}
         availableMembers={availableMembers}
         tagInput={tagInput}
         submitting={submittingChannel}
+        user={user}
         onFormDataChange={(data) => setFormData(prev => ({ ...prev, ...data }))}
         onFormErrorsChange={(errors) => setFormErrors(prev => ({ ...prev, ...errors }))}
         onTagInputChange={setTagInput}
@@ -955,32 +1287,32 @@ export const ChannelsScreen: React.FC<{ navigation: any }> = ({
         onToggleMember={toggleMember}
         onShowMemberSelector={() => setShowMemberSelector(true)}
       />
+      )}
 
-      {/* Member Selector Modal */}
-      <MemberSelectorModal
-        visible={showMemberSelector}
-        onClose={() => setShowMemberSelector(false)}
-        availableMembers={availableMembers}
-        selectedMembers={formData.members}
-        loadingMembers={loadingMembers}
-        onToggleMember={toggleMember}
-      />
-
-      {/* Action Sheet for Channel Options */}
-      {showActionSheet && (
-        <ActionSheet
-          key={selectedChannelForAction?.id || 'action-sheet'} // Force re-render with key
-          visible={showActionSheet}
-          title={channelTr.channelOptions()}
-          message={selectedChannelForAction ? `Options for "${selectedChannelForAction.title}"` : ''}
-          options={actionSheetOptions}
-          onClose={() => {
-            console.log('ActionSheet onClose called');
-            setShowActionSheet(false);
-            setSelectedChannelForAction(null);
-          }}
+      {/* Member Selector Modal - Only show for users with create permissions */}
+      {canCreateChannels() && (
+        <MemberSelectorModal
+          visible={showMemberSelector}
+          onClose={() => setShowMemberSelector(false)}
+          availableMembers={availableMembers}
+          selectedMembers={formData.members}
+          loadingMembers={loadingMembers}
+          onToggleMember={toggleMember}
         />
       )}
+
+      {/* Action Sheet for Channel Options */}
+      <ActionSheet
+        visible={showActionSheet}
+        title={channelTr.channelOptions()}
+        message={selectedChannelForAction ? `Options for "${selectedChannelForAction.title}"` : ''}
+        options={actionSheetOptions}
+        onClose={() => {
+          console.log('ActionSheet onClose called');
+          setShowActionSheet(false);
+          setSelectedChannelForAction(null);
+        }}
+      />
 
       {/* Delete Confirmation Modal */}
       <ConfirmationModal

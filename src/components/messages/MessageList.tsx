@@ -23,6 +23,7 @@ import type { Message as MessageType, TypingUser } from '../../types/message';
 interface MessageListProps {
   messages: MessageType[];
   currentUserId: string;
+  currentUser?: any;
   isLoading?: boolean;
   isLoadingMore?: boolean;
   hasMoreMessages?: boolean;
@@ -42,6 +43,7 @@ interface MessageListProps {
 export const MessageList: React.FC<MessageListProps> = ({
   messages,
   currentUserId,
+  currentUser,
   isLoading = false,
   isLoadingMore = false,
   hasMoreMessages = true,
@@ -81,10 +83,13 @@ export const MessageList: React.FC<MessageListProps> = ({
   const shouldShowDateSeparator = useCallback(
     (currentMessage: MessageType, previousMessage?: MessageType): boolean => {
       if (!previousMessage) return true;
-      return !isSameDay(
-        new Date(currentMessage.created_at),
-        new Date(previousMessage.created_at),
-      );
+      
+      const currentDate = new Date(currentMessage.created_at);
+      const previousDate = new Date(previousMessage.created_at);
+      const shouldShow = !isSameDay(currentDate, previousDate);
+      
+      
+      return shouldShow;
     },
     [],
   );
@@ -139,6 +144,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     const threads: { [key: string]: MessageType[] } = {};
     const mainMessages: MessageType[] = [];
     
+    
     // First pass: identify main messages and create thread map
     messages.forEach(message => {
       if (message.reply_to_id) {
@@ -156,6 +162,12 @@ export const MessageList: React.FC<MessageListProps> = ({
       }
     });
     
+    // Sort main messages by creation date (oldest first)
+    mainMessages.sort((a, b) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    
+    
     // Sort replies by creation date
     Object.keys(threads).forEach(threadId => {
       threads[threadId].sort((a, b) => 
@@ -169,7 +181,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   const renderMessage = useCallback(
     ({ item, index }: { item: MessageType; index: number }) => {
       const previousMessage =
-        index < messageThreads.mainMessages.length - 1 ? messageThreads.mainMessages[index + 1] : undefined;
+        index > 0 ? messageThreads.mainMessages[index - 1] : undefined;
       const isGrouped = shouldGroupMessage(item, previousMessage);
       const showDateSeparator = shouldShowDateSeparator(item, previousMessage);
       const replies = messageThreads.threads[item.id] || [];
@@ -187,6 +199,7 @@ export const MessageList: React.FC<MessageListProps> = ({
             key={`message-${item.id}`}
             message={item}
             currentUserId={currentUserId}
+            currentUser={currentUser}
             showAvatar={true}
             isGrouped={isGrouped}
             onReply={onReply}
@@ -213,6 +226,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                   <Message
                     message={reply}
                     currentUserId={currentUserId}
+                    currentUser={currentUser}
                     showAvatar={true}
                     isGrouped={false}
                     onReply={onReply}

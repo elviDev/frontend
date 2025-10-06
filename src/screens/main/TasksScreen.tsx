@@ -16,6 +16,8 @@ import {
   TaskSort,
   TaskStats,
   TaskStatus,
+  TaskPriority,
+  CreateTaskData,
 } from '../../types/task.types';
 import { MainStackParamList } from '../../types/navigation.types';
 import { useAppTranslation } from '../../hooks/useAppTranslation';
@@ -24,6 +26,10 @@ import { RootState, AppDispatch } from '../../store/store';
 import {
   fetchTasks,
   fetchTaskStats,
+  updateTask,
+  deleteTask,
+  assignTask,
+  updateTaskStatus,
   selectTasks,
   selectTaskStats,
   selectTasksLoading,
@@ -38,6 +44,8 @@ import { TaskStatsCards } from '../../components/task/TaskStatsCards';
 import { TaskSearchAndFilters } from '../../components/task/TaskSearchAndFilters';
 import { TaskFilterModal } from '../../components/task/TaskFilterModal';
 import { TaskViewRenderer } from '../../components/task/TaskViewRenderer';
+import { TaskEditModal } from '../../components/task/TaskEditModal';
+import { TaskAssignModal } from '../../components/task/TaskAssignModal';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { useWebSocket } from '../../services/websocketService';
 
@@ -90,6 +98,11 @@ export const TasksScreen: React.FC = () => {
   const [viewModeError, setViewModeError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Task action states
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
 
   // Handle view mode compatibility
   const compatibleViewMode = viewModeState === 'timeline' ? 'list' : viewModeState as 'list' | 'board' | 'calendar';
@@ -185,16 +198,15 @@ export const TasksScreen: React.FC = () => {
   };
 
 
-  // Use Redux taskStats or compute from tasks if not available
+  // Use only Redux taskStats from backend - no manual computation
   const displayStats = useMemo((): TaskStats => {
-    // If we have taskStats from Redux, use them
     if (taskStats) {
       return taskStats;
     }
 
-    // Otherwise compute stats from tasks
-    const stats: TaskStats = {
-      totalTasks: tasks.length,
+    // Return empty stats if no backend data available
+    return {
+      totalTasks: 0,
       tasksByStatus: {
         pending: 0,
         in_progress: 0,
@@ -214,42 +226,7 @@ export const TasksScreen: React.FC = () => {
       completedThisWeek: 0,
       averageCompletionTime: 0,
     };
-
-    const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    tasks.forEach(task => {
-      // Status counts
-      if (stats.tasksByStatus[task.status] !== undefined) {
-        stats.tasksByStatus[task.status]++;
-      }
-      
-      // Priority counts  
-      if (stats.tasksByPriority[task.priority] !== undefined) {
-        stats.tasksByPriority[task.priority]++;
-      }
-
-      // Overdue count
-      const dueDate = task.due_date || task.dueDate;
-      if (dueDate) {
-        const dueDateObj = new Date(dueDate);
-        if (dueDateObj < now && task.status !== 'completed' && task.status !== 'cancelled') {
-          stats.overdueTasks++;
-        }
-      }
-
-      // Completed this week
-      const completedAt = task.completed_at || task.completedAt;
-      if (task.status === 'completed' && completedAt) {
-        const completedDate = new Date(completedAt);
-        if (completedDate >= weekAgo) {
-          stats.completedThisWeek++;
-        }
-      }
-    });
-
-    return stats;
-  }, [tasks, taskStats]);
+  }, [taskStats]);
 
   // Filtered tasks are now handled by Redux state
   const filteredTasks = useMemo(() => {
@@ -283,14 +260,6 @@ export const TasksScreen: React.FC = () => {
     }
   };
 
-  const handleTaskLongPress = (_task: Task) => {
-    try {
-      // Future: implement multi-select functionality
-      console.log('Long press detected');
-    } catch (error) {
-      console.warn('TasksScreen: Error in handleTaskLongPress:', error);
-    }
-  };
 
   const handleCreateTask = useCallback(() => {
     if (!navigation || !navigationReady) {
@@ -316,9 +285,47 @@ export const TasksScreen: React.FC = () => {
     console.log('Sort functionality to be implemented');
   };
 
+  // Task action handlers
+  const handleEditTask = (task: Task) => {
+    setSelectedTask(task);
+    setShowEditModal(true);
+  };
+
+
+  const handleUpdateTask = async (taskId: string, updates: Partial<CreateTaskData>) => {
+    try {
+      await dispatch(updateTask({ taskId, updates })).unwrap();
+      // Refresh data
+      loadTasks();
+      loadTaskStats();
+    } catch (error) {
+      console.error('Failed to update task:', error);
+      throw error;
+    }
+  };
+
+
+
+  const handleAssignTask = (task: Task) => {
+    setSelectedTask(task);
+    setShowAssignModal(true);
+  };
+
+  const handleAssignUsers = async (taskId: string, userIds: string[]) => {
+    try {
+      await dispatch(assignTask({ taskId, userIds })).unwrap();
+      // Refresh data
+      loadTasks();
+      loadTaskStats();
+    } catch (error) {
+      console.error('Failed to assign users to task:', error);
+      throw error;
+    }
+  };
+
 
   return (
-    <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: '#F9FAFB', paddingTop: insets.top }}>
       {/* Header */}
       <TasksHeader
         viewMode={compatibleViewMode}
@@ -337,7 +344,7 @@ export const TasksScreen: React.FC = () => {
       />
 
       {/* Stats Cards */}
-      <View className="p-2">
+      <View style={{ padding: 8 }}>
         <TaskStatsCards taskStats={displayStats} />
       </View>
 
@@ -355,15 +362,23 @@ export const TasksScreen: React.FC = () => {
 
       {/* Error Display */}
       {viewModeError && (
-        <View className="mx-4 mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <Text className="text-red-600 font-semibold">View Mode Error</Text>
-          <Text className="text-red-500 text-sm mt-1">{viewModeError}</Text>
+        <View style={{
+          marginHorizontal: 16,
+          marginBottom: 16,
+          padding: 16,
+          backgroundColor: '#FEF2F2',
+          borderWidth: 1,
+          borderColor: '#FECACA',
+          borderRadius: 8,
+        }}>
+          <Text style={{ color: '#DC2626', fontWeight: '600' }}>View Mode Error</Text>
+          <Text style={{ color: '#EF4444', fontSize: 14, marginTop: 4 }}>{viewModeError}</Text>
         </View>
       )}
 
       {/* Task Views with Error Handling */}
       {loading ? (
-        <View className="flex-1 items-center justify-center">
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <LoadingSpinner size="large" />
         </View>
       ) : (
@@ -372,7 +387,6 @@ export const TasksScreen: React.FC = () => {
           viewMode={compatibleViewMode}
           searchQuery={searchQueryLocal}
           onTaskPress={handleTaskPress}
-          onTaskLongPress={handleTaskLongPress}
           refreshing={refreshing}
           onRefresh={onRefresh}
         />
@@ -385,6 +399,29 @@ export const TasksScreen: React.FC = () => {
         onClose={() => setShowFilters(false)}
         onFilterChange={(filters) => dispatch(setActiveFilters(filters))}
         onClearAll={handleFilterClear}
+      />
+
+
+      {/* Task Edit Modal */}
+      <TaskEditModal
+        visible={showEditModal}
+        task={selectedTask}
+        onClose={() => {
+          setShowEditModal(false);
+          setSelectedTask(null);
+        }}
+        onSave={handleUpdateTask}
+      />
+
+      {/* Task Assign Modal */}
+      <TaskAssignModal
+        visible={showAssignModal}
+        task={selectedTask}
+        onClose={() => {
+          setShowAssignModal(false);
+          setSelectedTask(null);
+        }}
+        onAssign={handleAssignUsers}
       />
     </View>
   );

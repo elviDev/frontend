@@ -20,7 +20,6 @@ import { userService } from '../../services/api/userService';
 import { API_BASE_URL } from '../../config/api';
 import { useAuth } from '../../hooks/useAuth';
 import { useUI } from '../../components/common/UIProvider';
-import { useAppTranslation } from '../../hooks/useAppTranslation';
 
 // Import existing components
 import { TaskDetailHeader } from '../../components/task/TaskDetailHeader';
@@ -32,6 +31,7 @@ import { TaskCommentsCard } from '../../components/task/TaskCommentsCard';
 import { TaskTagsCard } from '../../components/task/TaskTagsCard';
 import { TaskStatusModal } from '../../components/task/TaskStatusModal';
 import { TaskPriorityModal } from '../../components/task/TaskPriorityModal';
+import { TaskProgressModal } from '../../components/task/TaskProgressModal';
 import { TaskDetailFloatingActions } from '../../components/task/TaskDetailFloatingActions';
 import { TaskDetailsCard } from '../../components/task/TaskDetailsCard';
 import { TaskUtils } from '../../components/task/TaskUtils';
@@ -49,17 +49,18 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { t, tasks, common, errors } = useAppTranslation();
   const insets = useSafeAreaInsets();
   const { taskId } = route.params;
 
   // State
-  const [task, setTask] = useState<Task | null>(null);
+  const [task, setTask] = useState<(Task & { assignees?: TaskAssignee[]; reporter?: TaskAssignee }) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showPriorityModal, setShowPriorityModal] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
   const [_showAssigneeModal, _setShowAssigneeModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAddingComment, setIsAddingComment] = useState(false);
@@ -124,7 +125,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
       return {
         id: user.id,
         name: user.name,
-        avatar: user.avatar_url || user.name.charAt(0).toUpperCase(),
+        avatar_url: user.avatar_url,
         role: user.role || 'Team Member',
         email: user.email,
       };
@@ -134,7 +135,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
       return {
         id: userId,
         name: `User ${userId.substring(0, 8)}`,
-        avatar: userId.substring(0, 2).toUpperCase(),
+        avatar_url: undefined,
         role: 'Team Member',
         email: `${userId}@company.com`,
       };
@@ -189,7 +190,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         const assignees: TaskAssignee[] = (taskData as any).assignee_details?.map((assigneeDetail: any) => ({
           id: assigneeDetail.id,
           name: assigneeDetail.name,
-          avatar: assigneeDetail.avatar_url || assigneeDetail.name.charAt(0).toUpperCase(),
+          avatar_url: assigneeDetail.avatar_url,
           role: assigneeDetail.role || 'Team Member',
           email: assigneeDetail.email,
         })) || [];
@@ -205,7 +206,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
           reporter = {
             id: taskData.created_by,
             name: (taskData as any).owner_name,
-            avatar: (taskData as any).owner_name.charAt(0).toUpperCase(),
+            avatar_url: undefined,
             role: 'Task Creator',
             email: `${taskData.created_by}@company.com`, // Fallback email
           };
@@ -242,7 +243,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
                 id: apiComment.author_id,
                 name: apiComment.author_name || 'Unknown User',
                 email: apiComment.author_email || '',
-                avatar: (apiComment.author_name || 'U').charAt(0).toUpperCase(),
+                avatar_url: undefined,
                 role: 'Team Member' // Default role since backend doesn't provide it
               },
               timestamp: apiComment.created_at ? new Date(apiComment.created_at) : new Date(),
@@ -268,7 +269,24 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         }
 
         // Transform backend data to match component expectations
-        const transformedTask: Task = {
+        const transformedTask: Task & { 
+          assignees?: TaskAssignee[]; 
+          reporter?: TaskAssignee;
+          channelId?: string;
+          channelName?: string;
+          dueDate?: Date;
+          createdAt?: Date;
+          updatedAt?: Date;
+          completedAt?: Date;
+          estimatedHours?: number;
+          actualHours?: number;
+          progress?: number;
+          category?: string;
+          comments?: TaskComment[];
+          attachments?: any[];
+          dependencies?: any[];
+          subtasks?: any[];
+        } = {
           ...taskData,
           // Use real user data instead of dummy data
           assignees,
@@ -371,14 +389,14 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         description: task.description,
         status: newStatus,
         priority: task.priority,
-        task_type: task.task_type || task.category,
+        task_type: task.task_type,
         assigned_to: task.assignees?.map(a => a.id) || [],
         owned_by: task.owned_by,
         created_by: task.created_by || task.owned_by,
-        channel_id: task.channel_id || task.channelId,
-        due_date: task.due_date || task.dueDate,
+        channel_id: task.channel_id,
+        due_date: task.due_date,
         start_date: task.start_date,
-        estimated_hours: task.estimated_hours || task.estimatedHours,
+        estimated_hours: task.estimated_hours,
         tags: task.tags || [],
         business_value: task.business_value || 'medium',
         labels: task.labels || {},
@@ -435,14 +453,14 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         description: task.description,
         status: task.status,
         priority: newPriority,
-        task_type: task.task_type || task.category,
+        task_type: task.task_type,
         assigned_to: task.assignees?.map(a => a.id) || [],
         owned_by: task.owned_by,
         created_by: task.created_by || task.owned_by,
-        channel_id: task.channel_id || task.channelId,
-        due_date: task.due_date || task.dueDate,
+        channel_id: task.channel_id,
+        due_date: task.due_date,
         start_date: task.start_date,
-        estimated_hours: task.estimated_hours || task.estimatedHours,
+        estimated_hours: task.estimated_hours,
         tags: task.tags || [],
         business_value: task.business_value || 'medium',
         labels: task.labels || {},
@@ -484,6 +502,73 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
     }
   };
 
+  const updateTaskProgress = async (newProgress: number) => {
+    if (!task) {
+      console.error('❌ No task available for progress update');
+      return;
+    }
+    
+    try {
+      setIsUpdatingProgress(true);
+      console.log('🔄 Updating task progress:', { taskId: task.id, newProgress, oldProgress: task.progress_percentage });
+      
+      // Prepare complete task data with updated progress
+      const updatedTaskData = {
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        priority: task.priority,
+        task_type: task.task_type,
+        assigned_to: task.assignees?.map(a => a.id) || [],
+        owned_by: task.owned_by,
+        created_by: task.created_by || task.owned_by,
+        channel_id: task.channel_id,
+        due_date: task.due_date,
+        start_date: task.start_date,
+        estimated_hours: task.estimated_hours,
+        actual_hours: task.actual_hours,
+        progress_percentage: newProgress, // This is the key field we're updating
+        tags: task.tags || [],
+        business_value: task.business_value || 'medium',
+        labels: task.labels || {},
+      };
+      
+      console.log('🔄 Sending complete task data with updated progress:', updatedTaskData);
+      const response = await taskService.updateTask(task.id, updatedTaskData);
+      console.log('🔄 Progress update response:', { success: response.success, hasData: !!response.data });
+      
+      if (response.success && response.data) {
+        console.log('✅ Task progress updated successfully, waiting for backend sync...');
+        
+        // Wait a moment for backend to fully process the update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Clear all cached state and force fresh reload from API
+        setTask(null);
+        setIsLoading(true);
+        setError(null);
+        
+        console.log('🔄 Fetching fresh task data from backend...');
+        await loadTaskDetails();
+        
+        showSuccess(`Task progress updated to ${newProgress}%`);
+      } else {
+        console.error('❌ Progress update failed:', response);
+        showErrorAlert('Error', 'Failed to update task progress');
+      }
+    } catch (err) {
+      console.error('❌ Error updating task progress:', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Unknown error',
+        taskId: task.id,
+        newProgress
+      });
+      showErrorAlert('Error', `Failed to update task progress: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsUpdatingProgress(false);
+    }
+  };
+
   // Subtasks functionality removed - not implemented in backend yet
 
   // Check if current user can comment on this task
@@ -518,6 +603,16 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
     });
     
     return isAssigned || isReporter || isOwner;
+  };
+
+  // Check if current user can delete this task
+  const canDelete = () => {
+    if (!user || !task) {
+      return false;
+    }
+    
+    // Only CEO and managers can delete tasks
+    return user.role?.toLowerCase() === 'ceo' || user.role?.toLowerCase() === 'manager';
   };
 
   const addComment = async (content?: string) => {
@@ -577,7 +672,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
               id: apiComment.author_id,
               name: apiComment.author_name || 'Unknown User',
               email: apiComment.author_email || '',
-              avatar: (apiComment.author_name || 'U').charAt(0).toUpperCase(),
+              avatar_url: undefined,
               role: 'Team Member'
             },
             timestamp: apiComment.created_at ? new Date(apiComment.created_at) : new Date(),
@@ -676,7 +771,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
               id: apiComment.author_id,
               name: apiComment.author_name || 'Unknown User',
               email: apiComment.author_email || '',
-              avatar: (apiComment.author_name || 'U').charAt(0).toUpperCase(),
+              avatar_url: undefined,
               role: 'Team Member'
             },
             timestamp: apiComment.created_at ? new Date(apiComment.created_at) : new Date(),
@@ -755,7 +850,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
               id: apiComment.author_id,
               name: apiComment.author_name || 'Unknown User',
               email: apiComment.author_email || '',
-              avatar: (apiComment.author_name || 'U').charAt(0).toUpperCase(),
+              avatar_url: undefined,
               role: 'Team Member'
             },
             timestamp: apiComment.created_at ? new Date(apiComment.created_at) : new Date(),
@@ -839,7 +934,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
               id: apiComment.author_id,
               name: apiComment.author_name || 'Unknown User',
               email: apiComment.author_email || '',
-              avatar: (apiComment.author_name || 'U').charAt(0).toUpperCase(),
+              avatar_url: undefined,
               role: 'Team Member'
             },
             timestamp: apiComment.created_at ? new Date(apiComment.created_at) : new Date(),
@@ -894,7 +989,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
     if (task?.status !== 'completed') {
       showConfirm(
         'Complete Task',
-        'Are you sure you want to mark this task as completed?',
+        'Are you sure you want to mark this task as completed? This will change the status to completed but won\'t automatically set progress to 100%.',
         () => updateTaskStatus('completed'),
         undefined,
         {
@@ -905,6 +1000,43 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
     }
   };
 
+  const handleDeletePress = () => {
+    if (!task || !canDelete()) {
+      return;
+    }
+
+    showConfirm(
+      'Delete Task',
+      `Are you sure you want to delete "${task.title}"? This action cannot be undone.`,
+      async () => {
+        try {
+          // Import taskService for delete operation
+          const { taskService } = await import('../../services/api/taskService');
+          
+          const response = await taskService.deleteTask(task.id);
+          if (response.success) {
+            showSuccess('Task deleted successfully');
+            // Navigate to tasks screen and refresh the list
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'TasksScreen' }],
+            });
+          } else {
+            throw new Error('Failed to delete task');
+          }
+        } catch (error) {
+          console.error('Error deleting task:', error);
+          showErrorAlert('Error', 'Failed to delete task. Please try again.');
+        }
+      },
+      undefined,
+      {
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+      }
+    );
+  };
+
   const handleAddAssignee = () => {
     // Future: implement add assignee functionality
     console.log('Add assignee');
@@ -913,15 +1045,28 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
   if (isLoading) {
     return (
       <View
-        className="flex-1 bg-gray-50 items-center justify-center"
-        style={{ paddingTop: insets.top }}
+        style={{
+          flex: 1,
+          backgroundColor: '#F9FAFB',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingTop: insets.top
+        }}
       >
-        <View className="items-center">
-          <View className="w-16 h-16 bg-blue-100 rounded-full items-center justify-center mb-4">
-            <Text className="text-blue-600 text-lg font-bold">⏳</Text>
+        <View style={{ alignItems: 'center' }}>
+          <View style={{
+            width: 64,
+            height: 64,
+            backgroundColor: '#DBEAFE',
+            borderRadius: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16
+          }}>
+            <Text style={{ color: '#2563EB', fontSize: 18, fontWeight: 'bold' }}>⏳</Text>
           </View>
-          <Text className="text-gray-600 text-lg font-medium">Loading task...</Text>
-          <Text className="text-gray-400 text-sm mt-1">Please wait a moment</Text>
+          <Text style={{ color: '#4B5563', fontSize: 18, fontWeight: '500' }}>Loading task...</Text>
+          <Text style={{ color: '#9CA3AF', fontSize: 14, marginTop: 4 }}>Please wait a moment</Text>
         </View>
       </View>
     );
@@ -930,28 +1075,41 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
   if (error || !task) {
     return (
       <View
-        className="flex-1 bg-gray-50 items-center justify-center"
-        style={{ paddingTop: insets.top }}
+        style={{
+          flex: 1,
+          backgroundColor: '#F9FAFB',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingTop: insets.top
+        }}
       >
-        <View className="items-center">
-          <View className="w-16 h-16 bg-red-100 rounded-full items-center justify-center mb-4">
-            <Text className="text-red-600 text-lg font-bold">⚠️</Text>
+        <View style={{ alignItems: 'center' }}>
+          <View style={{
+            width: 64,
+            height: 64,
+            backgroundColor: '#FEE2E2',
+            borderRadius: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 16
+          }}>
+            <Text style={{ color: '#DC2626', fontSize: 18, fontWeight: 'bold' }}>⚠️</Text>
           </View>
-          <Text className="text-gray-600 text-lg font-medium">{error || 'Task not found'}</Text>
-          <Text className="text-gray-400 text-sm mt-1">Please check the task ID</Text>
+          <Text style={{ color: '#4B5563', fontSize: 18, fontWeight: '500' }}>{error || 'Task not found'}</Text>
+          <Text style={{ color: '#9CA3AF', fontSize: 14, marginTop: 4 }}>Please check the task ID</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: '#F9FAFB', paddingTop: insets.top }}>
       <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
 
       {/* Clean Header */}
       <TaskDetailHeader
         title="Task Details"
-        subtitle={task.channelName!}
+        subtitle={task.channel_name!}
         onBack={() => navigation.goBack()}
         onEdit={handleEditPress}
         isEditing={false}
@@ -959,7 +1117,7 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
 
       <ScrollView 
         showsVerticalScrollIndicator={false} 
-        className="flex-1"
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 100 }}
         refreshControl={
           <RefreshControl
@@ -978,10 +1136,11 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         />
 
         {/* Progress & Additional Details Row */}
-        <View className="mx-6 mt-4">
+        <View style={{ marginHorizontal: 24, marginTop: 16 }}>
           <TaskProgressCard
             task={task}
             formatDueDate={TaskUtils.formatDueDate}
+            onProgressPress={() => setShowProgressModal(true)}
           />
         </View>
 
@@ -1035,14 +1194,15 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         />
 
         {/* Bottom Spacing */}
-        <View className="h-4" />
+        <View style={{ height: 16 }} />
       </ScrollView>
 
       {/* Floating Action Buttons */}
       <TaskDetailFloatingActions
         fabScale={fabScale}
-        onEditPress={handleEditPress}
+        onDeletePress={handleDeletePress}
         onCompletePress={handleCompletePress}
+        showDeleteButton={canDelete()}
       />
 
       {/* Status Modal */}
@@ -1059,6 +1219,15 @@ export const TaskDetailScreen: React.FC<TaskDetailScreenProps> = ({
         currentPriority={task.priority}
         onPriorityChange={updateTaskPriority}
         onClose={() => setShowPriorityModal(false)}
+      />
+
+      {/* Progress Modal */}
+      <TaskProgressModal
+        visible={showProgressModal}
+        currentProgress={task.progress_percentage || 0}
+        onUpdateProgress={updateTaskProgress}
+        onClose={() => setShowProgressModal(false)}
+        isLoading={isUpdatingProgress}
       />
     </View>
   );

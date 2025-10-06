@@ -9,6 +9,7 @@ import {
 } from '../store/slices/taskSlice';
 import { Task } from '../types/task.types';
 import { WS_BASE_URL } from '../config/api';
+import { WebSocketDataTransformer } from '../utils/dataTransformers';
 export type WebSocketEventType = 
   | 'task_created' 
   | 'task_updated' 
@@ -736,34 +737,34 @@ class WebSocketService {
     });
   }
 
-  /**
-   * Schedule reconnection attempt (legacy method for backward compatibility)
-   */
-  private scheduleReconnect(): void {
-    this.handleReconnection();
-  }
 
   /**
    * Handle task updates from server
    */
   private handleTaskUpdate(event: TaskUpdateEvent): void {
+    // Transform event data to ensure consistency
+    const transformedEvent = WebSocketDataTransformer.transformTaskEvent(event);
     
-    switch (event.type) {
+    switch (transformedEvent.type) {
       case 'task_created':
-        store.dispatch(taskCreatedRealtime(event.task));
+        if (transformedEvent.task) {
+          store.dispatch(taskCreatedRealtime(transformedEvent.task));
+        }
         break;
         
       case 'task_updated':
       case 'task_completed':
-        store.dispatch(taskUpdatedRealtime(event.task));
+        if (transformedEvent.task) {
+          store.dispatch(taskUpdatedRealtime(transformedEvent.task));
+        }
         break;
         
       case 'task_deleted':
-        store.dispatch(taskDeletedRealtime(event.taskId));
+        store.dispatch(taskDeletedRealtime(transformedEvent.taskId));
         break;
         
       default:
-        console.warn('Unknown task update type:', event.type);
+        console.warn('Unknown task update type:', transformedEvent.type);
     }
   }
 
@@ -771,7 +772,6 @@ class WebSocketService {
    * Handle notifications from server
    */
   private handleNotification(notification: NotificationEvent): void {
-    
     // Emit to custom listeners
     this.emitToListeners('notification', notification);
     
@@ -1224,20 +1224,6 @@ class WebSocketService {
     );
   }
   
-  /**
-   * Validate message event
-   */
-  private validateMessageEvent(event: any): event is MessageEvent {
-    return (
-      event &&
-      typeof event.messageId === 'string' &&
-      typeof event.channelId === 'string' &&
-      typeof event.userId === 'string' &&
-      typeof event.userName === 'string' &&
-      typeof event.timestamp === 'string' &&
-      ['message_sent', 'message_updated', 'message_deleted'].includes(event.type)
-    );
-  }
   
   /**
    * Validate message reaction event
@@ -1404,4 +1390,4 @@ export function useWebSocket() {
     // Connection info
     reconnectionInfo: webSocketService.getReconnectionInfo(),
   };
-}
+}``

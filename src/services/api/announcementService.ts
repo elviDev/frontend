@@ -1,5 +1,5 @@
-import { apiClient } from './index';
-import { ApiResponse } from '../../types/api.types';
+import { tokenManager } from '../tokenManager';
+import { API_BASE_URL } from '../../config/api';
 
 export interface Announcement {
   id: string;
@@ -8,11 +8,11 @@ export interface Announcement {
   type: 'info' | 'warning' | 'success' | 'error' | 'feature' | 'maintenance';
   priority: 'low' | 'medium' | 'high' | 'critical';
   target_audience: 'all' | 'admins' | 'developers' | 'designers' | 'managers';
-  scheduled_for?: string | null;
-  expires_at?: string | null;
-  action_button_text?: string | null;
-  action_button_url?: string | null;
-  image_url?: string | null;
+  scheduled_for?: string;
+  expires_at?: string;
+  action_button_text?: string;
+  action_button_url?: string;
+  image_url?: string;
   created_by: string;
   published: boolean;
   read_by: string[];
@@ -27,275 +27,233 @@ export interface CreateAnnouncementData {
   type: Announcement['type'];
   priority: Announcement['priority'];
   target_audience: Announcement['target_audience'];
-  scheduled_for?: string;
-  expires_at?: string;
+  scheduled_for?: Date;
+  expires_at?: Date;
   action_button_text?: string;
   action_button_url?: string;
   image_url?: string;
   published?: boolean;
 }
 
-export interface UpdateAnnouncementData {
-  title?: string;
-  content?: string;
-  type?: Announcement['type'];
-  priority?: Announcement['priority'];
-  target_audience?: Announcement['target_audience'];
-  scheduled_for?: string | null;
-  expires_at?: string | null;
-  action_button_text?: string | null;
-  action_button_url?: string | null;
-  image_url?: string | null;
-  published?: boolean;
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  timestamp?: string;
 }
 
-export interface AnnouncementFilter {
-  type?: string;
-  priority?: string;
-  target_audience?: string;
-  published?: string;
-  created_by?: string;
-  date_from?: string;
-  date_to?: string;
-  limit?: string;
-  offset?: string;
-  user_view?: string;
-}
-
-export interface AnnouncementStats {
+export interface PaginatedResponse<T> extends ApiResponse<T[]> {
   total: number;
-  published: number;
-  scheduled: number;
-  expired: number;
-  byType: Record<string, number>;
-  byPriority: Record<string, number>;
-  byAudience: Record<string, number>;
+  limit: number;
+  offset: number;
 }
 
-export class AnnouncementService {
-  /**
-   * Create a new announcement (CEO only)
-   */
-  async createAnnouncement(data: CreateAnnouncementData): Promise<ApiResponse<Announcement>> {
+class AnnouncementService {
+  private async getAuthToken(): Promise<string | null> {
     try {
-      const response = await apiClient.post('/announcements', data);
-      return response.data;
-    } catch (error: any) {
-      console.error('Failed to create announcement:', error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to create announcement');
+      return await tokenManager.getCurrentToken();
+    } catch (error) {
+      console.error('Failed to get auth token:', error);
+      return null;
     }
   }
 
-  /**
-   * Get announcements with optional filtering
-   */
-  async getAnnouncements(filter: AnnouncementFilter = {}): Promise<ApiResponse<{
-    data: Announcement[];
-    total: number;
-    limit: number;
-    offset: number;
-  }>> {
-    try {
-      const params = new URLSearchParams();
-      
-      Object.entries(filter).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') {
-          params.append(key, value.toString());
-        }
-      });
+  private async makeRequest<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const token = await this.getAuthToken();
 
-      const response = await apiClient.get(`/announcements?${params.toString()}`);
-      return response.data;
-    } catch (error: any) {
-      console.error('Failed to get announcements:', error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to get announcements');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string>),
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
+
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API Error: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
   }
 
-  /**
-   * Get announcements visible to the current user
-   */
-  async getUserAnnouncements(includeRead: boolean = true): Promise<ApiResponse<{
-    data: Announcement[];
-    total: number;
-    limit: number;
-    offset: number;
-  }>> {
-    try {
-      const params = new URLSearchParams({
-        user_view: 'true',
-        limit: '50',
-        offset: '0'
-      });
-
-      const response = await apiClient.get(`/announcements?${params.toString()}`);
-      return response.data;
-    } catch (error: any) {
-      console.error('Failed to get user announcements:', error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to get user announcements');
-    }
+  // Create announcement (CEO only)
+  async createAnnouncement(data: CreateAnnouncementData): Promise<Announcement> {
+    const response = await this.makeRequest<ApiResponse<Announcement>>('/announcements', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...data,
+        scheduled_for: data.scheduled_for?.toISOString(),
+        expires_at: data.expires_at?.toISOString(),
+      }),
+    });
+    return response.data;
   }
 
-  /**
-   * Get announcement by ID
-   */
-  async getAnnouncementById(id: string): Promise<ApiResponse<Announcement>> {
-    try {
-      const response = await apiClient.get(`/announcements/${id}`);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Failed to get announcement ${id}:`, error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to get announcement');
-    }
+  // Get announcements for current user
+  async getUserAnnouncements(): Promise<Announcement[]> {
+    const response = await this.makeRequest<PaginatedResponse<Announcement>>(
+      '/announcements?user_view=true'
+    );
+    return response.data;
   }
 
-  /**
-   * Update an announcement (CEO only)
-   */
-  async updateAnnouncement(id: string, data: UpdateAnnouncementData): Promise<ApiResponse<Announcement>> {
-    try {
-      const response = await apiClient.put(`/announcements/${id}`, data);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Failed to update announcement ${id}:`, error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to update announcement');
-    }
-  }
+  // Get all announcements (CEO only)
+  async getAllAnnouncements(filters?: {
+    type?: string;
+    priority?: string;
+    published?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<PaginatedResponse<Announcement>> {
+    const params = new URLSearchParams();
+    if (filters?.type) params.set('type', filters.type);
+    if (filters?.priority) params.set('priority', filters.priority);
+    if (filters?.published !== undefined) params.set('published', String(filters.published));
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    if (filters?.offset) params.set('offset', String(filters.offset));
 
-  /**
-   * Delete an announcement (CEO only)
-   */
-  async deleteAnnouncement(id: string): Promise<ApiResponse<{ message: string }>> {
-    try {
-      const response = await apiClient.delete(`/announcements/${id}`);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Failed to delete announcement ${id}:`, error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to delete announcement');
-    }
-  }
-
-  /**
-   * Mark an announcement as read
-   */
-  async markAsRead(id: string): Promise<ApiResponse<{ message: string }>> {
-    try {
-      const response = await apiClient.post(`/announcements/${id}/read`);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Failed to mark announcement ${id} as read:`, error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to mark announcement as read');
-    }
-  }
-
-  /**
-   * Get announcement statistics (CEO only)
-   */
-  async getStats(): Promise<ApiResponse<AnnouncementStats>> {
-    try {
-      const response = await apiClient.get('/announcements/stats');
-      return response.data;
-    } catch (error: any) {
-      console.error('Failed to get announcement stats:', error);
-      throw new Error(error.response?.data?.error?.message || 'Failed to get announcement statistics');
-    }
-  }
-
-  /**
-   * Get unread announcement count for the current user
-   */
-  async getUnreadCount(): Promise<number> {
-    try {
-      const announcements = await this.getUserAnnouncements();
-      const currentUserId = 'current-user-id'; // This should come from auth context
-      
-      return announcements.data.data.filter(
-        announcement => !announcement.read_by.includes(currentUserId)
-      ).length;
-    } catch (error: any) {
-      console.error('Failed to get unread count:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Helper method to format announcement date
-   */
-  formatAnnouncementDate(dateString: string): string {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffHours < 1) return 'Just now';
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
+    const queryString = params.toString();
+    const url = `/announcements${queryString ? '?' + queryString : ''}`;
     
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+    return this.makeRequest<PaginatedResponse<Announcement>>(url);
+  }
+
+  // Get announcement by ID
+  async getAnnouncement(id: string): Promise<Announcement> {
+    const response = await this.makeRequest<ApiResponse<Announcement>>(`/announcements/${id}`);
+    return response.data;
+  }
+
+  // Mark announcement as read
+  async markAsRead(id: string): Promise<void> {
+    await this.makeRequest(`/announcements/${id}/read`, {
+      method: 'POST',
     });
   }
 
-  /**
-   * Helper method to get announcement type color
-   */
-  getAnnouncementTypeColor(type: Announcement['type']): string {
-    switch (type) {
-      case 'success': return '#10B981';
-      case 'warning': return '#F59E0B';
-      case 'error': return '#EF4444';
-      case 'feature': return '#8B5CF6';
-      case 'maintenance': return '#6B7280';
-      case 'info':
-      default:
-        return '#3B82F6';
+  // Get announcements list with optional filters
+  async getAnnouncements(options: {
+    limit?: number;
+    offset?: number;
+    user_view?: boolean;
+    type?: string;
+    priority?: string;
+    target_audience?: string;
+    published?: boolean;
+  } = {}): Promise<PaginatedResponse<Announcement>> {
+    const params = new URLSearchParams();
+    
+    Object.entries(options).forEach(([key, value]) => {
+      if (value !== undefined) {
+        params.append(key, value.toString());
+      }
+    });
+    
+    const queryString = params.toString();
+    const endpoint = `announcements${queryString ? `?${queryString}` : ''}`;
+    
+    return this.makeRequest<PaginatedResponse<Announcement>>(endpoint);
+  }
+
+  // Get announcement statistics (CEO only) - with fallback handling
+  async getStats(): Promise<{
+    success: boolean;
+    data: {
+      total: number;
+      published: number;
+      scheduled: number;
+      expired: number;
+      active: number;
+      recent: Announcement[];
+    };
+  }> {
+    try {
+      // Try the backend stats endpoint first
+      const response = await this.makeRequest<ApiResponse<{
+        total: number;
+        published: number;
+        scheduled: number;
+        expired: number;
+        byType: Record<string, number>;
+        byPriority: Record<string, number>;
+        byAudience: Record<string, number>;
+      }>>('/announcements/stats');
+      
+      if (response.success && response.data) {
+        const backendStats = response.data;
+        
+        // Calculate active from available data
+        const active = backendStats.published - backendStats.expired;
+        
+        return {
+          success: true,
+          data: {
+            total: backendStats.total,
+            published: backendStats.published,
+            scheduled: backendStats.scheduled,
+            expired: backendStats.expired,
+            active: Math.max(0, active),
+            recent: [] // Backend stats don't include recent announcements
+          }
+        };
+      }
+    } catch (error) {
+      console.warn('Backend stats endpoint failed, falling back to client-side calculation:', error);
     }
-  }
-
-  /**
-   * Helper method to get announcement priority color
-   */
-  getAnnouncementPriorityColor(priority: Announcement['priority']): string {
-    switch (priority) {
-      case 'critical': return '#DC2626';
-      case 'high': return '#EA580C';
-      case 'medium': return '#D97706';
-      case 'low':
-      default:
-        return '#65A30D';
+    
+    // Fallback: Calculate stats client-side
+    try {
+      const response = await this.getAnnouncements({ limit: 100, user_view: false });
+      
+      if (!response.success) {
+        throw new Error('Failed to fetch announcements for fallback stats');
+      }
+      
+      const announcements = response.data;
+      const now = new Date();
+      
+      const stats = {
+        total: announcements.length,
+        published: announcements.filter(a => a.published).length,
+        scheduled: announcements.filter(a => a.scheduled_for && new Date(a.scheduled_for) > now).length,
+        expired: announcements.filter(a => a.expires_at && new Date(a.expires_at) < now).length,
+        active: announcements.filter(a => 
+          a.published && 
+          (!a.expires_at || new Date(a.expires_at) > now)
+        ).length,
+        recent: announcements.slice(0, 5)
+      };
+      
+      return {
+        success: true,
+        data: stats
+      };
+    } catch (error) {
+      console.error('Both backend and fallback stats calculation failed:', error);
+      
+      // Return empty stats instead of failing
+      return {
+        success: true, // Still return success with empty data
+        data: {
+          total: 0,
+          published: 0,
+          scheduled: 0,
+          expired: 0,
+          active: 0,
+          recent: []
+        }
+      };
     }
-  }
-
-  /**
-   * Helper method to check if announcement is expired
-   */
-  isExpired(announcement: Announcement): boolean {
-    if (!announcement.expires_at) return false;
-    return new Date(announcement.expires_at) < new Date();
-  }
-
-  /**
-   * Helper method to check if announcement is scheduled for the future
-   */
-  isScheduled(announcement: Announcement): boolean {
-    if (!announcement.scheduled_for) return false;
-    return new Date(announcement.scheduled_for) > new Date();
-  }
-
-  /**
-   * Helper method to check if announcement is currently active
-   */
-  isActive(announcement: Announcement): boolean {
-    if (!announcement.published) return false;
-    if (this.isExpired(announcement)) return false;
-    if (this.isScheduled(announcement)) return false;
-    return true;
   }
 }
 
 export const announcementService = new AnnouncementService();
-export default announcementService;

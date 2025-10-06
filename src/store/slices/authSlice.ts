@@ -1,6 +1,7 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import type { AuthState, User, AuthTokens, LoginCredentials, RegisterCredentials } from '../../types/auth';
 import { authService } from '../../services/api/authService';
+import { userService } from '../../services/api/userService';
 import { tokenManager } from '../../services/tokenManager';
 import { webSocketService } from '../../services/websocketService';
 
@@ -114,7 +115,6 @@ export const updateUserProfile = createAsyncThunk(
   'auth/updateUserProfile',
   async (updateData: any, { rejectWithValue, dispatch }) => {
     try {
-      const { userService } = await import('../../services/api/userService');
       const updatedUser = await userService.updateCurrentUser(updateData);
       
       // Dispatch the user update to sync across the app

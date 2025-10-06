@@ -1,18 +1,30 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import LinearGradient from 'react-native-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
-import { PromptInput } from '../../components/voice/PromptInput';
+import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
+import { HomeAIBot } from '../../components/ai/HomeAIBot';
 import { useAuth } from '../../hooks/useAuth';
-import { useUI } from '../../components/common/UIProvider';
+import { useAuthorization } from '../../contexts/AuthorizationContext';
+
+export type TabParamList = {
+  Home: undefined;
+  Activity: undefined;
+  Tasks: undefined;
+  Channels: { openCreateModal?: boolean } | undefined;
+};
+
+type DashboardScreenNavigationProp = BottomTabNavigationProp<TabParamList>;
 
 const DashboardScreen = () => {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
+  const navigation = useNavigation<DashboardScreenNavigationProp>();
   const { user } = useAuth();
-  const { showInfo } = useUI();
+  const { canCreateChannels, canCreateTasks } = useAuthorization();
+  const [showAIBot, setShowAIBot] = useState(false);
 
   const getUserInitials = (name?: string) => {
     if (!name) return 'U';
@@ -23,30 +35,30 @@ const DashboardScreen = () => {
   };
 
   const handleProfilePress = () => {
-    // Navigate to own profile - don't pass userId so UserProfileScreen knows it's own profile
-    navigation.navigate('Main', { screen: 'UserProfile', params: {} });
+    // Navigate to own profile - need to access parent navigator since UserProfile is in Main stack
+    const parentNavigation = navigation.getParent();
+    if (parentNavigation) {
+      parentNavigation.navigate('UserProfile', { userId: undefined });
+    }
   };
 
-  const handleSendMessage = (text: string) => {
-    console.log('Sending text message:', text);
-    // Handle text message
+  const handleCreateChannel = () => {
+    // Navigate to Channels tab and auto-open the create channel modal
+    // Since we're already in the TabNavigator, we can navigate directly to Channels
+    navigation.navigate('Channels', { openCreateModal: true });
   };
 
-  const handleSendRecording = (audioUri: string, transcript?: string) => {
-    console.log('Sending audio recording:', audioUri);
-    console.log('Voice transcript:', transcript);
-    // Handle audio message with transcript
+  const handleCreateTask = () => {
+    // Navigate to TaskCreateScreen in the parent Main stack
+    const parentNavigation = navigation.getParent();
+    if (parentNavigation) {
+      parentNavigation.navigate('TaskCreateScreen');
+    } else {
+      // Fallback: try direct navigation
+      navigation.navigate('TaskCreateScreen' as never);
+    }
   };
 
-  const handleAttachFile = (file: any) => {
-    console.log('File attached:', file);
-    showInfo(`${file.name} has been attached`);
-  };
-
-  const handleAttachImage = (image: any) => {
-    console.log('Image attached:', image);
-    showInfo('Image has been attached');
-  };
 
   return (
     <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
@@ -129,43 +141,75 @@ const DashboardScreen = () => {
         </View>
 
         <View className="px-4 pb-4">
-        {/* Quick Action Buttons */}
-        <View className="flex-row justify-center mb-2 gap-2">
-          <TouchableOpacity
-            className="bg-gray-200 rounded-full px-5 py-3"
-            onPress={() => console.log('Create a channel')}
-          >
-            <Text className="text-gray-700 text-sm font-medium">
-              Create a channel
-            </Text>
-          </TouchableOpacity>
+        {/* Quick Action Buttons - Only show if user has appropriate permissions */}
+        {(canCreateChannels() || canCreateTasks()) && (
+          <View className="flex-row justify-center mb-6 gap-4">
+            {canCreateChannels() && (
+              <TouchableOpacity
+                className="bg-blue-50 rounded-full px-6 py-3 border border-blue-200 flex-1 max-w-xs"
+                onPress={handleCreateChannel}
+              >
+                <Text className="text-blue-700 text-sm font-medium text-center">
+                  Create Channel
+                </Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            className="bg-gray-200 rounded-full px-5 py-3"
-            onPress={() => console.log('Add user')}
-          >
-            <Text className="text-gray-700 text-sm font-medium">Add user</Text>
-          </TouchableOpacity>
+            {canCreateTasks() && (
+              <TouchableOpacity
+                className="bg-purple-50 rounded-full px-6 py-3 border border-purple-200 flex-1 max-w-xs"
+                onPress={handleCreateTask}
+              >
+                <Text className="text-purple-700 text-sm font-medium text-center">
+                  Create Task
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-          <TouchableOpacity
-            className="bg-gray-200 rounded-full px-5 py-3"
-            onPress={() => console.log('Create task')}
+        {/* AI Assistant Button */}
+        <TouchableOpacity
+          onPress={() => setShowAIBot(true)}
+          className="mx-8 mb-6"
+        >
+          <LinearGradient
+            colors={['#8B5CF6', '#3B82F6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="rounded-2xl px-6 py-4"
+            style={{
+              shadowColor: '#8B5CF6',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 8,
+            }}
           >
-            <Text className="text-gray-700 text-sm font-medium">
-              Create task
+            <View className="flex-row items-center justify-center">
+              <MaterialIcon name="smart-toy" size={24} color="white" />
+              <Text className="text-white text-lg font-bold ml-3">
+                Ask TT AI
+              </Text>
+            </View>
+            <Text className="text-purple-100 text-center text-sm mt-2">
+              {user?.role === 'ceo' 
+                ? 'Get insights, manage teams, create announcements' 
+                : user?.role === 'manager'
+                ? 'Manage teams, track progress, analyze performance'
+                : 'Check tasks, deadlines, and get help with work'
+              }
             </Text>
-          </TouchableOpacity>
-        </View>
-        <PromptInput
-          onSendMessage={handleSendMessage}
-          onSendRecording={handleSendRecording}
-          onAttachFile={handleAttachFile}
-          onAttachImage={handleAttachImage}
-          placeholder="Ask Javiar"
-          disabled={false}
-        />
+          </LinearGradient>
+        </TouchableOpacity>
         </View>
       </ScrollView>
+      
+      {/* AI Bot Modal */}
+      <HomeAIBot 
+        visible={showAIBot} 
+        onClose={() => setShowAIBot(false)} 
+      />
     </View>
   );
 };

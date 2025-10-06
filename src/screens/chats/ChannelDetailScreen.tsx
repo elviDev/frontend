@@ -14,8 +14,12 @@ import { MessageList } from '../../components/messages/MessageList';
 import { MessageInput } from '../../components/messages/MessageInput';
 import { useChannelState } from '../../hooks/useChannelState';
 import { useMessages } from '../../hooks/useMessages';
+import { useWebSocket } from '../../services/websocketService';
 import { useToast } from '../../contexts/ToastContext';
 import { RootState } from '../../store/store';
+import { canSendMessage, getChannelPermissions } from '../../utils/channelPermissions';
+import { FloatingAIButton } from '../../components/ai/FloatingAIButton';
+import { AIChannelBot } from '../../components/ai/AIChannelBot';
 import type { Message } from '../../types/message';
 import type { MainStackParamList } from '../../navigation/MainNavigator';
 
@@ -34,14 +38,16 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
   const currentUserId = currentUser?.id || 'unknown_user';
   
   const { showError, showSuccess, showInfo } = useToast();
+  const { joinChannel, leaveChannel, isConnected, on } = useWebSocket();
 
   // Local state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [showAIBot, setShowAIBot] = useState(false);
 
   // Use custom hooks for state management
   const [channelState, channelActions] = useChannelState(channelId);
-  console.log("Channel State:", channelState)
+ 
   const {
     messages,
     isLoading,
@@ -52,14 +58,28 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     sendMessage,
     editMessage,
     deleteMessage,
-    addReaction,
     loadMoreMessages,
     startTyping,
     stopTyping,
     canSendMessage: userCanSendMessage,
     currentChannel,
   } = useMessages(channelId);
-  console.log("Messages:", messages[0]);
+
+  // Create a temporary channel object from route params for permission checking
+  // This ensures permissions work immediately while currentChannel loads asynchronously
+  const channelForPermissions = currentChannel || {
+    id: channelId,
+    name: channelName,
+    members: (members || []).map(m => m.id || m.user_id).filter(Boolean),
+    privacy_level: 'public', // Default to public if unknown
+    created_by: null,
+    owned_by: null,
+    moderators: [],
+    auto_join_roles: [],
+  };
+
+  // Check if current user can send messages using either loaded channel or route params
+  const userCanSendMessages = canSendMessage(channelForPermissions, currentUser);
   
   const {
     // Channel state
@@ -104,7 +124,12 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         replyTo: replyingTo ? {
           id: replyingTo.id,
           content: replyingTo.content,
-          sender: replyingTo.user_id? {id: replyingTo.user_id, name: replyingTo.user_name, avatar: replyingTo.user_avatar, role: replyingTo.user_role} : { name: 'Unknown User' },
+          sender: replyingTo.user_details ? {
+            id: replyingTo.user_details.id, 
+            name: replyingTo.user_details.name, 
+            avatar: replyingTo.user_details.avatar_url, 
+            role: replyingTo.user_details.role
+          } : { name: 'Unknown User' },
         } : undefined,
         attachments,
       });
@@ -144,14 +169,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     }
   };
 
-  const handleReaction = async (messageId: string, emoji: string) => {
-    try {
-      await addReaction(messageId, emoji);
-    } catch (err: any) {
-      console.error('Failed to add reaction:', err);
-      showError(err?.error?.message || err?.message || 'Failed to add reaction');
-    }
-  };
 
 
   // const handleGenerateSummary = () => {
@@ -166,6 +183,36 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
     // Navigate to user profile screen
     navigation.navigate('UserProfile', { userId });
   };
+
+  // Join/leave channel room for websocket updates
+  useEffect(() => {
+    if (isConnected && channelId) {
+      joinChannel(channelId);
+      
+      return () => {
+        leaveChannel(channelId);
+      };
+    }
+  }, [channelId, isConnected, joinChannel, leaveChannel]);
+
+  // Handle channel deletion - navigate back if current channel is deleted
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    const unsubscribeChannelDeleted = on('channel_deleted', (event: any) => {
+      // Backend sends: { type, channelId, data: { type, channelId, userId, userName, userRole, timestamp }, timestamp }
+      const deletedChannelId = event.channelId;
+      
+      if (deletedChannelId === channelId) {
+        showError('This channel has been deleted');
+        navigation.goBack();
+      }
+    });
+
+    return () => {
+      unsubscribeChannelDeleted();
+    };
+  }, [channelId, isConnected, navigation, showError, on]);
 
 
   return (
@@ -205,6 +252,7 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
         <MessageList
           messages={messages}
           currentUserId={currentUserId}
+          currentUser={currentUser}
           isLoading={isLoading}
           isLoadingMore={isLoadingMore}
           hasMoreMessages={hasMoreMessages}
@@ -216,7 +264,6 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
           onReply={setReplyingTo}
           onEdit={setEditingMessage}
           onDelete={handleDeleteMessage}
-          onReaction={handleReaction}
           onUserPress={handleUserPress}
         />
 
@@ -250,12 +297,28 @@ export const ChannelDetailScreen: React.FC<ChannelDetailScreenProps> = ({
           channelMembers={enhancedMembers}
           isLoading={false}
           autoFocus={true}
-          disabled={!userCanSendMessage}
+          disabled={!userCanSendMessages}
           permissionMessage={
-            !userCanSendMessage 
-              ? `As a ${currentUser?.role}, you can view this channel but cannot send messages. Contact an admin if you need to participate.`
+            !userCanSendMessages 
+              ? `You do not have permission to send messages in this channel.`
               : undefined
           }
+        />
+
+        {/* AI Assistant Button */}
+        <FloatingAIButton 
+          onPress={() => setShowAIBot(true)}
+          bottom={120}
+          right={20}
+        />
+
+        {/* AI Channel Bot */}
+        <AIChannelBot
+          visible={showAIBot}
+          onClose={() => setShowAIBot(false)}
+          channelName={channelName}
+          channelDescription={channelState.description}
+          messages={messages}
         />
       </View>
     </KeyboardAvoidingView>

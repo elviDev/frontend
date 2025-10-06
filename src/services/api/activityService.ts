@@ -62,7 +62,8 @@ class ActivityService {
    */
   private async makeRequest<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retryCount: number = 0
   ): Promise<T> {
     console.log('🔄 ActivityService makeRequest called:', {
       endpoint,
@@ -113,10 +114,28 @@ class ActivityService {
           console.log('🚨 Raw response text:', rawErrorText);
         }
         
+        // Handle retryable database timeout errors
+        const isRetryable = errorData.error?.isRetryable === true;
+        const recommendedDelay = errorData.error?.recommendedDelay || 2000;
+        
+        if (isRetryable && retryCount === 0) {
+          console.log(`ActivityService: Database timeout detected, retrying ${endpoint} after ${recommendedDelay}ms...`);
+          
+          // Wait for the recommended delay before retrying
+          await new Promise(resolve => setTimeout(resolve, recommendedDelay));
+          
+          try {
+            return this.makeRequest(endpoint, options, 1); // Retry once with retryCount = 1
+          } catch (retryError) {
+            console.error('ActivityService: Retry failed:', retryError);
+            // Fall through to create user-friendly error
+          }
+        }
+        
         // Create detailed error message
-        const errorMessage = errorData.message || 
-          errorData.error?.message || 
-          `HTTP ${response.status}: ${response.statusText}`;
+        const errorMessage = isRetryable 
+          ? 'Service temporarily unavailable. Please try again in a moment.'
+          : (errorData.message || errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
           
         console.log('🚨 Creating error with message:', errorMessage);
         const error = new Error(errorMessage);

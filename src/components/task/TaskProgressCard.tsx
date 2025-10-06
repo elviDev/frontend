@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import Animated, { FadeInUp, ZoomIn } from 'react-native-reanimated';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { Task } from '../../types/task.types';
@@ -8,13 +8,15 @@ import { TaskUtils } from './TaskUtils';
 interface TaskProgressCardProps {
   task: Task;
   formatDueDate: (date: Date) => string;
+  onProgressPress?: () => void;
 }
 
 export const TaskProgressCard: React.FC<TaskProgressCardProps> = ({
   task,
   formatDueDate,
+  onProgressPress,
 }) => {
-  const progressPercentage = task.progress || 0;
+  const progressPercentage = task.progress_percentage || 0;
   const completedSubtasks = task.subtasks?.filter(s => s.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
   
@@ -37,8 +39,10 @@ export const TaskProgressCard: React.FC<TaskProgressCardProps> = ({
   return (
     <Animated.View
       entering={FadeInUp.delay(300).duration(600)}
-      className="bg-white rounded-2xl p-6"
       style={{
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 24,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.06,
@@ -47,51 +51,81 @@ export const TaskProgressCard: React.FC<TaskProgressCardProps> = ({
       }}
     >
       {/* Header with Progress */}
-      <View className="flex-row items-center justify-between mb-5">
-        <View className="flex-row items-center">
-          <MaterialIcon 
-            name={getProgressIcon(progressPercentage)} 
-            size={20} 
-            color={getProgressColor(progressPercentage)}
-            style={{ marginRight: 8 }}
-          />
-          <Text className="text-lg font-bold text-gray-900">Progress</Text>
+      <TouchableOpacity
+        onPress={onProgressPress}
+        activeOpacity={onProgressPress ? 0.7 : 1}
+        style={{ marginBottom: 20 }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <MaterialIcon 
+              name={getProgressIcon(progressPercentage)} 
+              size={20} 
+              color={getProgressColor(progressPercentage)}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827' }}>Progress</Text>
+            {onProgressPress && (
+              <MaterialIcon 
+                name="edit" 
+                size={16} 
+                color="#6B7280"
+                style={{ marginLeft: 8 }}
+              />
+            )}
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text 
+              style={{ 
+                fontSize: 24, 
+                fontWeight: 'bold',
+                color: getProgressColor(progressPercentage)
+              }}
+            >
+              {progressPercentage}%
+            </Text>
+            {progressPercentage === 100 && (
+              <Text style={{ fontSize: 12, color: '#10B981', fontWeight: '500' }}>Complete!</Text>
+            )}
+          </View>
         </View>
-        <View className="items-end">
-          <Text 
-            className="text-2xl font-bold"
-            style={{ color: getProgressColor(progressPercentage) }}
-          >
-            {progressPercentage}%
-          </Text>
-          {progressPercentage === 100 && (
-            <Text className="text-xs text-green-600 font-medium">Complete!</Text>
-          )}
-        </View>
-      </View>
 
-      {/* Progress Bar */}
-      <View className="bg-gray-200 h-3 rounded-full mb-5 overflow-hidden">
-        <Animated.View
-          entering={ZoomIn.delay(500).duration(800)}
-          className="h-full rounded-full"
-          style={{
-            width: `${progressPercentage}%`,
-            backgroundColor: getProgressColor(progressPercentage),
-          }}
-        />
-      </View>
+        {/* Progress Bar */}
+        <View style={{ backgroundColor: '#E5E7EB', height: 12, borderRadius: 6, overflow: 'hidden' }}>
+          <Animated.View
+            entering={ZoomIn.delay(500).duration(800)}
+            style={{
+              height: '100%',
+              borderRadius: 6,
+              width: `${progressPercentage}%`,
+              backgroundColor: getProgressColor(progressPercentage),
+            }}
+          />
+        </View>
+
+        {onProgressPress && (
+          <Text style={{
+            fontSize: 12,
+            color: '#6B7280',
+            textAlign: 'center',
+            marginTop: 8,
+            fontStyle: 'italic',
+          }}>
+            Tap to update progress
+          </Text>
+        )}
+      </TouchableOpacity>
 
       {/* Progress Details */}
-      <View className="space-y-3">
+      <View style={{ gap: 12 }}>
         {/* Subtasks Progress */}
         {totalSubtasks > 0 && (
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row items-center">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <MaterialIcon name="task-alt" size={16} color="#6B7280" />
-              <Text className="text-gray-500 text-sm ml-2">Subtasks</Text>
+              <Text style={{ color: '#6B7280', fontSize: 14, marginLeft: 8 }}>Subtasks</Text>
             </View>
-            <Text className="text-gray-900 font-semibold text-sm">
+            <Text style={{ color: '#111827', fontWeight: '600', fontSize: 14 }}>
               {completedSubtasks} of {totalSubtasks}
             </Text>
           </View>
@@ -99,12 +133,12 @@ export const TaskProgressCard: React.FC<TaskProgressCardProps> = ({
 
         {/* Due Date */}
         {task.dueDate && (
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row items-center">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <MaterialIcon name="schedule" size={16} color="#6B7280" />
-              <Text className="text-gray-500 text-sm ml-2">Due Date</Text>
+              <Text style={{ color: '#6B7280', fontSize: 14, marginLeft: 8 }}>Due Date</Text>
             </View>
-            <Text className="text-gray-900 font-semibold text-sm">
+            <Text style={{ color: '#111827', fontWeight: '600', fontSize: 14 }}>
               {formatDueDate(task.dueDate)}
             </Text>
           </View>
@@ -112,12 +146,12 @@ export const TaskProgressCard: React.FC<TaskProgressCardProps> = ({
 
         {/* Time Tracking */}
         {(task.estimatedHours || task.actualHours) && (
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row items-center">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <MaterialIcon name="access-time" size={16} color="#6B7280" />
-              <Text className="text-gray-500 text-sm ml-2">Time</Text>
+              <Text style={{ color: '#6B7280', fontSize: 14, marginLeft: 8 }}>Time</Text>
             </View>
-            <Text className="text-gray-900 font-semibold text-sm">
+            <Text style={{ color: '#111827', fontWeight: '600', fontSize: 14 }}>
               {task.actualHours || 0}h / {task.estimatedHours || 0}h
             </Text>
           </View>

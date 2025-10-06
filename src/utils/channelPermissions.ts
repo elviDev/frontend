@@ -11,7 +11,37 @@ export interface ChannelPermissions {
 }
 
 /**
- * Calculate user permissions for a specific channel
+ * Check if user can access a channel based on backend authorization logic
+ */
+export function canUserAccessChannel(channel: Channel, user: User): boolean {
+  if (!channel || !user) return false;
+
+  const userRole = user.role;
+  const userId = user.id;
+
+  // CEO can access everything
+  if (userRole === 'ceo') return true;
+
+  // Check if user is a member
+  const isMember = channel.members?.includes(userId) || false;
+  
+  // Public channels are accessible to all authenticated users
+  if (channel.privacy_level === 'public') return true;
+  
+  // Check if user is a member for private/restricted channels
+  if (isMember) return true;
+  
+  // Restricted channels check auto-join roles
+  if (channel.privacy_level === 'restricted') {
+    return channel.auto_join_roles?.includes(userRole) || false;
+  }
+  
+  // Private channels require explicit membership
+  return false;
+}
+
+/**
+ * Calculate user permissions for a specific channel using backend authorization logic
  */
 export function getChannelPermissions(
   channel: Channel | null,
@@ -43,10 +73,35 @@ export function getChannelPermissions(
   // Check if user is channel member
   const isMember = channel.members?.includes(userId) || false;
   
-  // Check user role permissions
+  // Check user role permissions based on backend schema
   const isCEO = userRole === 'ceo';
   const isManager = userRole === 'manager';
-  const isStaff = userRole === 'staff';
+
+  // Check channel access using backend logic from can_user_access_channel function
+  const canAccess = () => {
+    // CEO can access everything
+    if (isCEO) return true;
+    
+    // Public channels are accessible to all
+    if (channel.privacy_level === 'public') return true;
+    
+    // Check if user is a member
+    if (isMember) return true;
+    
+    // Restricted channels check auto-join roles or membership
+    if (channel.privacy_level === 'restricted') {
+      return channel.auto_join_roles?.includes(userRole) || isMember;
+    }
+    
+    // Private channels require membership
+    if (channel.privacy_level === 'private') return isMember;
+    
+    return false;
+  };
+
+  if (!canAccess()) {
+    return defaultPermissions;
+  }
 
   // CEO has full access to all channels
   if (isCEO) {
@@ -84,11 +139,11 @@ export function getChannelPermissions(
     };
   }
 
-  // Manager role permissions - can view and send messages in all channels
+  // Manager role permissions - matches backend middleware authorization
   if (isManager) {
     return {
       canView: true,
-      canSendMessages: true, // Managers can send messages even if not explicit members
+      canSendMessages: true,
       canEditMessages: false,
       canDeleteMessages: false,
       canManageMembers: false,
@@ -177,7 +232,7 @@ export function getMessageSendDeniedReason(
   }
 
   if (channel.privacy_level === 'public' && !isMember) {
-    return 'You must join this channel to send messages';
+    return 'You must be a member to send messages. Contact the CEO to be added to this channel';
   }
 
   return 'You do not have permission to send messages in this channel';

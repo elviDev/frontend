@@ -1,4 +1,4 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction, createSelector } from '@reduxjs/toolkit';
 import { Task, CreateTaskData, TaskFilter, TaskStats } from '../../types/task.types';
 import { taskService } from '../../services/api/taskService';
 
@@ -13,7 +13,7 @@ const deduplicateTasks = (tasks: Task[]): Task[] => {
       console.warn(`TaskSlice: Duplicate task found with ID: ${task.id}`, {
         title: task.title,
         status: task.status,
-        assignedTo: task.assigned_to || task.assignees
+        assignedTo: task.assigned_to
       });
       return false;
     }
@@ -129,7 +129,8 @@ interface TaskState {
     total: number;
     limit: number;
     offset: number;
-    hasMore: boolean;
+    has_more: boolean;
+    hasMore?: boolean; // Computed property for compatibility
   };
   
   // Filters and search
@@ -174,7 +175,7 @@ const initialState: TaskState = {
     total: 0,
     limit: 20,
     offset: 0,
-    hasMore: false,
+    has_more: false,
   },
   
   // Filters and search
@@ -217,7 +218,7 @@ const taskSlice = createSlice({
       const cleanedFilters: any = {};
       
       Object.entries(action.payload).forEach(([key, value]) => {
-        if (key === 'dueDate') {
+        if (key === 'due_date') {
           if (value && (value.from || value.to)) {
             cleanedFilters[key] = value;
           }
@@ -294,10 +295,10 @@ const taskSlice = createSlice({
       }
       
       // Update in channel tasks
-      if (updatedTask.channelId && state.channelTasks[updatedTask.channelId]) {
-        const channelIndex = state.channelTasks[updatedTask.channelId].findIndex(task => task.id === updatedTask.id);
+      if (updatedTask.channel_id && state.channelTasks[updatedTask.channel_id]) {
+        const channelIndex = state.channelTasks[updatedTask.channel_id].findIndex(task => task.id === updatedTask.id);
         if (channelIndex !== -1) {
-          state.channelTasks[updatedTask.channelId][channelIndex] = updatedTask;
+          state.channelTasks[updatedTask.channel_id][channelIndex] = updatedTask;
         }
       }
       
@@ -321,13 +322,13 @@ const taskSlice = createSlice({
       }
       
       // Add to channel tasks if applicable
-      if (newTask.channelId) {
-        if (!state.channelTasks[newTask.channelId]) {
-          state.channelTasks[newTask.channelId] = [];
+      if (newTask.channel_id) {
+        if (!state.channelTasks[newTask.channel_id]) {
+          state.channelTasks[newTask.channel_id] = [];
         }
-        const existsInChannel = state.channelTasks[newTask.channelId].find(task => task.id === newTask.id);
+        const existsInChannel = state.channelTasks[newTask.channel_id].find(task => task.id === newTask.id);
         if (!existsInChannel) {
-          state.channelTasks[newTask.channelId].unshift(newTask);
+          state.channelTasks[newTask.channel_id].unshift(newTask);
         }
       }
       
@@ -420,7 +421,10 @@ const taskSlice = createSlice({
         
         state.tasks = uniqueTasks;
         state.filteredTasks = applyFilters(uniqueTasks, state.activeFilters);
-        state.pagination = action.payload.pagination;
+        state.pagination = {
+          ...action.payload.pagination,
+          hasMore: action.payload.pagination.has_more // Add compatibility property
+        };
         state.lastFetch = Date.now();
       })
       .addCase(fetchTasks.rejected, (state, action) => {
@@ -473,11 +477,11 @@ const taskSlice = createSlice({
         state.tasks.unshift(action.payload);
         
         // Add to channel tasks if applicable
-        if (action.payload.channelId) {
-          if (!state.channelTasks[action.payload.channelId]) {
-            state.channelTasks[action.payload.channelId] = [];
+        if (action.payload.channel_id) {
+          if (!state.channelTasks[action.payload.channel_id]) {
+            state.channelTasks[action.payload.channel_id] = [];
           }
-          state.channelTasks[action.payload.channelId].unshift(action.payload);
+          state.channelTasks[action.payload.channel_id].unshift(action.payload);
         }
         
         // Update filtered tasks
@@ -581,25 +585,20 @@ function matchesFilters(task: Task, filters: TaskFilter): boolean {
   // Priority filter - only apply if array exists and is not empty
   if (filters.priority && filters.priority.length > 0 && !filters.priority.includes(task.priority)) return false;
   
-  // Handle both assignee field formats
-  if (filters.assignee && filters.assignee.length > 0) {
-    const taskAssignees = task.assignees || (task.assigned_to ? task.assigned_to.map(id => ({ id })) : []);
-    if (!filters.assignee.some(id => taskAssignees.some(assignee => assignee.id === id))) return false;
+  // Assignee filter using assigned_to field
+  if (filters.assigned_to && filters.assigned_to.length > 0) {
+    if (!filters.assigned_to.some(id => task.assigned_to.includes(id))) return false;
   }
   
-  // Handle both channel field formats
-  const taskChannelId = task.channelId || task.channel_id;
-  if (filters.channel && filters.channel.length > 0 && taskChannelId && !filters.channel.includes(taskChannelId)) return false;
+  // Channel filter using channel_id field
+  if (filters.channel_id && task.channel_id && task.channel_id !== filters.channel_id) return false;
   
   // Tags filter - only apply if array exists and is not empty
   if (filters.tags && filters.tags.length > 0 && !filters.tags.some(tag => task.tags.includes(tag))) return false;
   
-  // Handle both due date field formats
-  if (filters.dueDate) {
-    const taskDueDate = task.dueDate || task.due_date;
-    if (filters.dueDate.from && (!taskDueDate || new Date(taskDueDate) < filters.dueDate.from)) return false;
-    if (filters.dueDate.to && (!taskDueDate || new Date(taskDueDate) > filters.dueDate.to)) return false;
-  }
+  // Due date filters using due_date field
+  if (filters.due_after && (!task.due_date || new Date(task.due_date) < filters.due_after)) return false;
+  if (filters.due_before && (!task.due_date || new Date(task.due_date) > filters.due_before)) return false;
   return true;
 }
 
@@ -609,7 +608,7 @@ function sortTasks(tasks: Task[], field: string, order: 'asc' | 'desc'): Task[] 
     let bValue = b[field as keyof Task];
     
     // Handle date fields
-    if (field === 'dueDate' || field === 'createdAt' || field === 'updatedAt') {
+    if (field === 'due_date' || field === 'created_at' || field === 'updated_at') {
       aValue = aValue ? new Date(aValue as string).getTime() : 0;
       bValue = bValue ? new Date(bValue as string).getTime() : 0;
     }
@@ -649,10 +648,10 @@ function updateTaskInArrays(state: TaskState, updatedTask: Task) {
   }
   
   // Update in channel tasks
-  if (updatedTask.channelId && state.channelTasks[updatedTask.channelId]) {
-    const channelIndex = state.channelTasks[updatedTask.channelId].findIndex(task => task.id === updatedTask.id);
+  if (updatedTask.channel_id && state.channelTasks[updatedTask.channel_id]) {
+    const channelIndex = state.channelTasks[updatedTask.channel_id].findIndex(task => task.id === updatedTask.id);
     if (channelIndex !== -1) {
-      state.channelTasks[updatedTask.channelId][channelIndex] = updatedTask;
+      state.channelTasks[updatedTask.channel_id][channelIndex] = updatedTask;
     }
   }
   
@@ -704,21 +703,26 @@ export const {
   resetTasks,
 } = taskSlice.actions;
 
-// Selectors
-export const selectTasks = (state: { tasks: TaskState }) => {
-  // Check if there are any non-empty filters
-  const hasActiveFilters = Object.entries(state.tasks.activeFilters).some(([key, value]) => {
-    if (key === 'dueDate') {
-      return value && (value.from || value.to);
-    }
-    return Array.isArray(value) ? value.length > 0 : Boolean(value);
-  });
-  
-  const tasks = hasActiveFilters ? state.tasks.filteredTasks : state.tasks.tasks;
-  
-  // Extra safety: deduplicate at selector level to prevent React key conflicts
-  return deduplicateTasks(tasks);
-};
+// Memoized selectors
+export const selectTasks = createSelector(
+  (state: { tasks: TaskState }) => state.tasks.tasks,
+  (state: { tasks: TaskState }) => state.tasks.filteredTasks,
+  (state: { tasks: TaskState }) => state.tasks.activeFilters,
+  (tasks: Task[], filteredTasks: Task[], activeFilters: TaskFilter) => {
+    // Check if there are any non-empty filters
+    const hasActiveFilters = Object.entries(activeFilters).some(([key, value]) => {
+      if (key === 'due_date') {
+        return value && (value as any).from || (value as any).to;
+      }
+      return Array.isArray(value) ? value.length > 0 : Boolean(value);
+    });
+    
+    const selectedTasks = hasActiveFilters ? filteredTasks : tasks;
+    
+    // Extra safety: deduplicate at selector level to prevent React key conflicts
+    return deduplicateTasks(selectedTasks);
+  }
+);
   
 export const selectSelectedTask = (state: { tasks: TaskState }) => state.tasks.selectedTask;
 export const selectTasksLoading = (state: { tasks: TaskState }) => state.tasks.loading;
@@ -733,27 +737,36 @@ export const selectPendingUpdates = (state: { tasks: TaskState }) => state.tasks
 export const selectChannelTasks = (channelId: string) => (state: { tasks: TaskState }) =>
   state.tasks.channelTasks[channelId] || [];
 
-// Complex selectors
-export const selectTasksByStatus = (state: { tasks: TaskState }) => {
-  const tasks = selectTasks(state);
-  return tasks.reduce((acc, task) => {
-    if (!acc[task.status]) acc[task.status] = [];
-    acc[task.status].push(task);
-    return acc;
-  }, {} as Record<Task['status'], Task[]>);
-};
+// Complex memoized selectors
+export const selectTasksByStatus = createSelector(
+  selectTasks,
+  (tasks: Task[]) => {
+    return tasks.reduce((acc: Record<Task['status'], Task[]>, task: Task) => {
+      if (!acc[task.status]) acc[task.status] = [];
+      acc[task.status].push(task);
+      return acc;
+    }, {} as Record<Task['status'], Task[]>);
+  }
+);
 
-export const selectOverdueTasks = (state: { tasks: TaskState }) =>
-  selectTasks(state).filter(task => 
-    task.dueDate && 
-    new Date(task.dueDate) < new Date() && 
-    task.status !== 'completed' && 
-    task.status !== 'cancelled'
-  );
+export const selectOverdueTasks = createSelector(
+  selectTasks,
+  (tasks: Task[]) => {
+    const now = new Date();
+    return tasks.filter((task: Task) => 
+      task.due_date && 
+      new Date(task.due_date) < now && 
+      task.status !== 'completed' && 
+      task.status !== 'cancelled'
+    );
+  }
+);
 
-export const selectHighPriorityTasks = (state: { tasks: TaskState }) =>
-  selectTasks(state).filter(task => 
+export const selectHighPriorityTasks = createSelector(
+  selectTasks,
+  (tasks: Task[]) => tasks.filter((task: Task) => 
     task.priority === 'urgent' || task.priority === 'high'
-  );
+  )
+);
 
 export default taskSlice.reducer;

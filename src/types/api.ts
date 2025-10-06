@@ -6,8 +6,7 @@ export interface ApiResponse<T> {
     total: number;
     limit: number;
     offset: number;
-    hasMore: boolean;
-    has_more?: boolean; // Backend field
+    has_more: boolean;
   };
   timestamp: string;
 }

@@ -27,31 +27,28 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   viewMode = 'list',
 }) => {
   const { translateTaskStatus, translateTaskPriority, translateBackendText } = useBackendTranslation();
-  const dueDateValue = task.dueDate || task.due_date;
-  const dueDate = dueDateValue ? new Date(dueDateValue) : new Date();
+  const dueDate = task.due_date ? new Date(task.due_date) : new Date();
   const isOverdue = TaskUtils.isOverdue(dueDate, task.status);
   const isDueSoon = TaskUtils.isDueSoon(dueDate, task.status);
   
-  // Only use real assignee data from backend - no fallbacks
+  // Use backend assignee_details directly - no transformations
   const assignees = React.useMemo(() => {
-    // Only use assignee_details from backend response with complete data
-    if ((task as any).assignee_details && Array.isArray((task as any).assignee_details)) {
-      return (task as any).assignee_details
-        .filter((assigneeDetail: any) => assigneeDetail.id && assigneeDetail.name) // Only valid data
-        .map((assigneeDetail: any) => ({
-          id: assigneeDetail.id,
-          name: assigneeDetail.name,
-          avatar: assigneeDetail.avatar_url || assigneeDetail.name.charAt(0).toUpperCase(),
-          role: assigneeDetail.role,
-          email: assigneeDetail.email,
+    if (task.assignee_details && Array.isArray(task.assignee_details)) {
+      return task.assignee_details
+        .filter((assignee) => assignee.id && assignee.name)
+        .map((assignee) => ({
+          id: assignee.id,
+          name: assignee.name,
+          avatar: assignee.avatar_url || assignee.name.charAt(0).toUpperCase(),
+          role: assignee.role,
+          email: assignee.email,
         }));
     }
-    
-    // No fallbacks - return empty array if no proper data
     return [];
-  }, [task]);
-  const channelName = task.channelName || task.channel_name;
-  const progress = task.progress || task.progress_percentage;
+  }, [task.assignee_details]);
+  
+  const channelName = task.channel_name;
+  const progress = task.progress_percentage;
 
   return (
     <AnimatedTouchableOpacity
@@ -94,7 +91,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 color="#6B7280"
               />
               <Text className="text-gray-600 text-xs ml-1 uppercase font-medium">
-                {task.task_type || task.category || 'general'}
+                {task.task_type || 'general'}
               </Text>
             </View>
             {channelName && (

@@ -89,25 +89,24 @@ export const useMessages = (channelId: string) => {
     isInitialLoad: true,
   });
 
-  // Helper function to ensure message has required properties
+  // Simplified message normalization - preserve original author info when possible
   const normalizeMessage = useCallback((msg: Message): Message => {
-    let reactions = msg.reactions || [];
-
-    // If reactions is an object, convert to array
-    if (typeof reactions === 'object' && !Array.isArray(reactions)) {
-      reactions = Object.values(reactions);
+    // Only add user_details if completely missing - don't overwrite existing ones
+    if (!msg.user_details) {
+      console.warn(`Message ${msg.id} missing user_details, using fallback`);
     }
-
-    // Ensure it's an array
-    if (!Array.isArray(reactions)) {
-      reactions = [];
-    }
-
+    
     return {
       ...msg,
-      reactions,
-      attachments: msg.attachments || {},
+      reactions: msg.reactions || [],
+      attachments: msg.attachments || [],
       mentions: msg.mentions || [],
+      user_details: msg.user_details || {
+        id: msg.user_id || 'unknown_user',
+        name: 'Unknown User',
+        avatar_url: undefined,
+        role: undefined,
+      },
     };
   }, []);
 
@@ -517,7 +516,7 @@ export const useMessages = (channelId: string) => {
         const response = await messageService.editMessage(
           channelId,
           messageId,
-          content,
+          { content }
         );
 
         if (response.success && response.data) {
@@ -536,7 +535,17 @@ export const useMessages = (channelId: string) => {
           });
 
           updateMessages(prev =>
-            prev.map(msg => (msg.id === messageId ? finalMessage : msg)),
+            prev.map(msg => {
+              if (msg.id === messageId) {
+                // Preserve original author details when editing
+                return {
+                  ...finalMessage,
+                  user_details: finalMessage.user_details || msg.user_details,
+                  user_id: finalMessage.user_id || msg.user_id,
+                };
+              }
+              return msg;
+            }),
           );
 
           showSuccess('Message updated!');
@@ -666,172 +675,6 @@ export const useMessages = (channelId: string) => {
     [messages, deletingMessages, updateMessages, showSuccess, showError],
   );
 
-  const addReaction = useCallback(
-    async (messageId: string, emoji: string): Promise<void> => {
-      try {
-        const currentUserId = currentUser?.id || 'current-user';
-        const originalMessage = messages.find(m => m.id === messageId);
-
-        if (!originalMessage) {
-          return;
-        }
-
-        // Optimistically update UI
-        setMessages(prev =>
-          prev.map(msg => {
-            if (msg.id !== messageId) return msg;
-
-            // Ensure reactions array exists - handle both array and object formats
-            let reactions = msg.reactions || [];
-
-            // If reactions is an object, convert to array
-            if (typeof reactions === 'object' && !Array.isArray(reactions)) {
-              reactions = Object.values(reactions);
-            }
-
-            // Ensure it's an array
-            if (!Array.isArray(reactions)) {
-              reactions = [];
-            }
-            const existingReaction = reactions.find(r => r.emoji === emoji);
-            const userAlreadyReacted = existingReaction?.users.some(
-              (u: any) => u.id === currentUserId,
-            );
-
-            if (userAlreadyReacted) {
-              // Remove user's reaction
-              return {
-                ...msg,
-                reactions: reactions
-                  .map(r =>
-                    r.emoji === emoji
-                      ? {
-                          ...r,
-                          users: r.users.filter(
-                            (u: any) => u.id !== currentUserId,
-                          ),
-                          count: r.count - 1,
-                        }
-                      : r,
-                  )
-                  .filter(r => r.count > 0),
-              };
-            } else {
-              // Add user's reaction
-              if (existingReaction) {
-                return {
-                  ...msg,
-                  reactions: reactions.map(r =>
-                    r.emoji === emoji
-                      ? {
-                          ...r,
-                          users: [
-                            ...r.users,
-                            {
-                              id: currentUserId,
-                              name: currentUser?.name || 'Current User',
-                              email: currentUser?.email || '',
-                              isOnline: true,
-                            },
-                          ],
-                          count: r.count + 1,
-                        }
-                      : r,
-                  ),
-                };
-              } else {
-                return {
-                  ...msg,
-                  reactions: [
-                    ...reactions,
-                    {
-                      emoji,
-                      users: [
-                        {
-                          id: currentUserId,
-                          name: currentUser?.name || 'Current User',
-                          email: currentUser?.email || '',
-                          isOnline: true,
-                        },
-                      ],
-                      count: 1,
-                    },
-                  ],
-                };
-              }
-            }
-          }),
-        );
-
-        try {
-          const response = await messageService.toggleReaction(
-            channelId,
-            messageId,
-            emoji,
-          );
-
-          if (response.success) {
-            // Handle different response formats
-            let currentReactions = [];
-            if (response.data?.current_reactions) {
-              // Expected format: {current_reactions: [...]}
-              currentReactions = response.data.current_reactions;
-            } else if (Array.isArray(response.data)) {
-              // Alternative format: direct array
-              currentReactions = response.data;
-            } else {
-              // Keep the optimistic update, don't revert
-              return;
-            }
-            const updatedReactions = currentReactions.map(
-              (r: {
-                emoji: string;
-                count: number;
-                users: Array<{
-                  id: string;
-                  name: string;
-                  email?: string;
-                  avatar_url?: string;
-                }>;
-              }) => ({
-                emoji: r.emoji,
-                count: r.count,
-                users: r.users.map(u => ({
-                  id: u.id,
-                  name: u.name,
-                  email: u.email || '',
-                  avatar: u.avatar_url || '',
-                  isOnline: true,
-                })),
-              }),
-            );
-
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === messageId
-                  ? { ...msg, reactions: updatedReactions }
-                  : msg,
-              ),
-            );
-          }
-        } catch (err: any) {
-          console.error('Failed to toggle reaction:', err.message || err);
-          // Revert on error - ensure original message has reactions array
-          const safeOriginalMessage = {
-            ...originalMessage,
-            reactions: originalMessage.reactions || [],
-          };
-          setMessages(prev =>
-            prev.map(msg => (msg.id === messageId ? safeOriginalMessage : msg)),
-          );
-        }
-      } catch (error: any) {
-        console.error('Critical error in addReaction:', error.message || error);
-        // Don't update UI state on critical errors
-      }
-    },
-    [currentUser, messages, channelId],
-  );
 
   // Enhanced typing indicators with debouncing and proper cleanup
   const startTyping = useCallback(() => {
@@ -873,6 +716,67 @@ export const useMessages = (channelId: string) => {
     lastTypingTimestampRef.current = 0;
   }, [channelId]);
 
+  // Send thread reply
+  const sendThreadReply = useCallback(
+    async (parentMessageId: string, content: string): Promise<void> => {
+      try {
+        const response = await messageService.sendThreadReply(channelId, parentMessageId, {
+          content,
+          message_type: 'text',
+        });
+
+        if (response.success) {
+          // Thread reply will be added via WebSocket event
+          showSuccess('Reply sent!');
+        } else {
+          throw new Error(response.error?.message || 'Failed to send reply');
+        }
+      } catch (error: any) {
+        console.error('Failed to send thread reply:', error);
+        showError(`Failed to send reply: ${error.message}`);
+        throw error;
+      }
+    },
+    [channelId, showSuccess, showError]
+  );
+
+  // Pin/unpin message
+  const pinMessage = useCallback(
+    async (messageId: string): Promise<void> => {
+      try {
+        const response = await messageService.pinMessage(channelId, messageId);
+        if (response.success) {
+          showSuccess('Message pinned!');
+        } else {
+          throw new Error(response.error?.message || 'Failed to pin message');
+        }
+      } catch (error: any) {
+        console.error('Failed to pin message:', error);
+        showError(`Failed to pin message: ${error.message}`);
+        throw error;
+      }
+    },
+    [channelId, showSuccess, showError]
+  );
+
+  const unpinMessage = useCallback(
+    async (messageId: string): Promise<void> => {
+      try {
+        const response = await messageService.unpinMessage(channelId, messageId);
+        if (response.success) {
+          showSuccess('Message unpinned!');
+        } else {
+          throw new Error(response.error?.message || 'Failed to unpin message');
+        }
+      } catch (error: any) {
+        console.error('Failed to unpin message:', error);
+        showError(`Failed to unpin message: ${error.message}`);
+        throw error;
+      }
+    },
+    [channelId, showSuccess, showError]
+  );
+
   // Enhanced WebSocket event handlers with sync support
   useEffect(() => {
     // WebSocket should already be connected via auth slice, just ensure it's ready
@@ -908,18 +812,6 @@ export const useMessages = (channelId: string) => {
       
       // Log the complete message object that will be used
       const messageForUI = (data as any).data?.message || data.message || data.data;
-      if (messageForUI) {
-        console.log('📨 Complete message data from WebSocket:', {
-          id: messageForUI.id,
-          content: messageForUI.content,
-          reply_to_id: messageForUI.reply_to_id,
-          has_reply_to_object: !!messageForUI.reply_to,
-          reply_to_content: messageForUI.reply_to?.content,
-          reply_to_user: messageForUI.reply_to?.user_name,
-          user_name: messageForUI.user_name,
-          created_at: messageForUI.created_at
-        });
-      }
 
       // Handle both channelId and channel_id formats
       const eventChannelId = data.channelId || data.channel_id;
@@ -1003,7 +895,17 @@ export const useMessages = (channelId: string) => {
             updatedMessage.content,
           );
           setMessages(prev =>
-            prev.map(msg => (msg.id === data.messageId ? updatedMessage : msg)),
+            prev.map(msg => {
+              if (msg.id === data.messageId) {
+                // Preserve original author details when updating message
+                return {
+                  ...updatedMessage,
+                  user_details: updatedMessage.user_details || msg.user_details,
+                  user_id: updatedMessage.user_id || msg.user_id,
+                };
+              }
+              return msg;
+            }),
           );
         } catch (error) {
           console.error('Error processing message_updated event:', error);
@@ -1019,18 +921,20 @@ export const useMessages = (channelId: string) => {
         fullData: data,
       });
 
-      if (data.channelId === channelId) {
-        console.log('✅ Deleting message:', data.data.messageId);
-        setMessages(prev => {
-          const filtered = prev.filter(msg => msg.id !== data.data.messageId);
-          console.log(
-            'Messages before deletion:',
-            prev.length,
-            'After deletion:',
-            filtered.length,
-          );
-          return filtered;
-        });
+      if (data.channelId === channelId && data.messageId) {
+        console.log('✅ Marking message as deleted:', data.messageId);
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === data.messageId 
+              ? {
+                  ...msg,
+                  deleted_at: data.timestamp || new Date().toISOString(),
+                  deleted_by: data.userId,
+                  deleted_by_name: data.userName
+                }
+              : msg
+          )
+        );
       }
     };
 
@@ -1098,11 +1002,147 @@ export const useMessages = (channelId: string) => {
       }
     };
 
+    // Thread reply events - MISSING FROM CURRENT IMPLEMENTATION
+    const handleThreadReplySent = (data: any) => {
+      console.log('🧵 WebSocket thread_reply_sent event received:', data);
+      
+      if (data.channelId === channelId) {
+        const threadReply = data.message;
+        if (threadReply) {
+          updateMessages(prev => [...prev, threadReply]);
+          
+          // Update parent message thread info if available
+          if (data.parentMessageId) {
+            updateMessages(prev => prev.map(msg => 
+              msg.id === data.parentMessageId
+                ? { 
+                    ...msg, 
+                    reply_count: (msg.reply_count || 0) + 1,
+                    last_reply_timestamp: threadReply.created_at
+                  }
+                : msg
+            ));
+          }
+        }
+      }
+    };
+
+    // Message reaction events - ENHANCED FOR BACKEND COMPATIBILITY
+    const handleMessageReactionUpdated = (event: any) => {
+      console.log('⚡ WebSocket message_reaction_updated event received:', event);
+      
+      // Handle both flat and nested data structures
+      const data = event.data || event;
+      const channelIdFromEvent = data.channelId || event.channelId;
+      const messageId = data.messageId || event.messageId;
+      const reactions = data.reactions || event.reactions;
+      
+      if (channelIdFromEvent === channelId && messageId) {
+        console.log('🔄 Updating reactions for message:', messageId, 'with:', reactions);
+        updateMessages(prev => prev.map(msg => 
+          msg.id === messageId
+            ? { ...msg, reactions: reactions || [] }
+            : msg
+        ));
+      }
+    };
+
+    // Direct reply events - NEWLY ADDED
+    const handleMessageReplySent = (data: any) => {
+      console.log('↩️ WebSocket message_reply_sent event received:', data);
+      
+      if (data.channelId === channelId) {
+        const replyMessage = data.message;
+        if (replyMessage) {
+          updateMessages(prev => [...prev, replyMessage]);
+          
+          // Update parent message reply count if available
+          if (data.parentMessageId) {
+            updateMessages(prev => prev.map(msg => 
+              msg.id === data.parentMessageId
+                ? { 
+                    ...msg, 
+                    reply_count: (msg.reply_count || 0) + 1,
+                    last_reply_timestamp: replyMessage.created_at
+                  }
+                : msg
+            ));
+          }
+        }
+      }
+    };
+
+    // Reply update events - NEWLY ADDED  
+    const handleReplyUpdated = (data: any) => {
+      console.log('✏️ WebSocket reply_updated event received:', data);
+      
+      if (data.channelId === channelId && data.replyId) {
+        updateMessages(prev => prev.map(msg => 
+          msg.id === data.replyId
+            ? { ...msg, ...data.reply, is_edited: true, edited_at: data.reply.edited_at }
+            : msg
+        ));
+      }
+    };
+
+    // Reply deletion events - NEWLY ADDED
+    const handleReplyDeleted = (data: any) => {
+      console.log('🗑️ WebSocket reply_deleted event received:', data);
+      
+      if (data.channelId === channelId && data.replyId) {
+        // Mark reply as deleted instead of removing it completely
+        updateMessages(prev => 
+          prev.map(msg => 
+            msg.id === data.replyId 
+              ? {
+                  ...msg,
+                  deleted_at: data.timestamp || new Date().toISOString(),
+                  deleted_by: data.userId,
+                  deleted_by_name: data.userName
+                }
+              : msg
+          )
+        );
+        
+        // Update parent message reply count if available
+        if (data.messageId) {
+          updateMessages(prev => prev.map(msg => 
+            msg.id === data.messageId
+              ? { 
+                  ...msg, 
+                  reply_count: Math.max((msg.reply_count || 1) - 1, 0)
+                }
+              : msg
+          ));
+        }
+      }
+    };
+
+    // Message pin/unpin events - MISSING FROM CURRENT IMPLEMENTATION
+    const handleMessagePinned = (data: any) => {
+      console.log('📌 WebSocket message_pinned event received:', data);
+      
+      if (data.channelId === channelId && data.messageId) {
+        updateMessages(prev => prev.map(msg => 
+          msg.id === data.messageId
+            ? { ...msg, is_pinned: data.pinned }
+            : msg
+        ));
+      }
+    };
+
     // Register event listeners
     webSocketService.on('message_sent', handleMessageSent);
     webSocketService.on('message_updated', handleMessageUpdated);
     webSocketService.on('message_deleted', handleMessageDeleted);
-    webSocketService.on('reaction_toggled', handleReactionToggled);
+    webSocketService.on('thread_reply_sent', handleThreadReplySent); // ADDED
+    webSocketService.on('message_reply_sent', handleMessageReplySent); // NEWLY ADDED
+    webSocketService.on('reply_updated', handleReplyUpdated); // NEWLY ADDED
+    webSocketService.on('reply_deleted', handleReplyDeleted); // NEWLY ADDED
+    webSocketService.on('message_reaction_updated', handleMessageReactionUpdated); // ADDED
+    webSocketService.on('message_pinned', handleMessagePinned); // ADDED
+    webSocketService.on('message_unpinned', handleMessagePinned); // Same handler for unpin
+    webSocketService.on('reaction_toggled', handleReactionToggled); // Keep for backward compatibility
     webSocketService.on('reactions_cleared', handleReactionsCleared);
     webSocketService.on('typing_indicator', handleTypingIndicator);
 
@@ -1186,6 +1226,13 @@ export const useMessages = (channelId: string) => {
       webSocketService.off('message_sent', handleMessageSent);
       webSocketService.off('message_updated', handleMessageUpdated);
       webSocketService.off('message_deleted', handleMessageDeleted);
+      webSocketService.off('thread_reply_sent', handleThreadReplySent); // ADDED
+      webSocketService.off('message_reply_sent', handleMessageReplySent); // NEWLY ADDED
+      webSocketService.off('reply_updated', handleReplyUpdated); // NEWLY ADDED
+      webSocketService.off('reply_deleted', handleReplyDeleted); // NEWLY ADDED
+      webSocketService.off('message_reaction_updated', handleMessageReactionUpdated); // ADDED
+      webSocketService.off('message_pinned', handleMessagePinned); // ADDED
+      webSocketService.off('message_unpinned', handleMessagePinned); // ADDED
       webSocketService.off('reaction_toggled', handleReactionToggled);
       webSocketService.off('reactions_cleared', handleReactionsCleared);
       webSocketService.off('typing_indicator', handleTypingIndicator);
@@ -1310,9 +1357,11 @@ export const useMessages = (channelId: string) => {
     typingUsers,
     pagination,
     sendMessage,
+    sendThreadReply, // ADDED
     editMessage,
     deleteMessage,
-    addReaction,
+    pinMessage, // ADDED
+    unpinMessage, // ADDED
     loadMoreMessages,
     startTyping,
     stopTyping,

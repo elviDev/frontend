@@ -11,14 +11,16 @@ import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 
 interface TaskDetailFloatingActionsProps {
   fabScale: SharedValue<number>;
-  onEditPress: () => void;
+  onDeletePress: () => void;
   onCompletePress: () => void;
+  showDeleteButton: boolean;
 }
 
 export const TaskDetailFloatingActions: React.FC<TaskDetailFloatingActionsProps> = ({
   fabScale,
-  onEditPress,
+  onDeletePress,
   onCompletePress,
+  showDeleteButton,
 }) => {
   const animatedFabStyle = useAnimatedStyle(() => ({
     transform: [{ scale: fabScale.value }],
@@ -34,24 +36,58 @@ export const TaskDetailFloatingActions: React.FC<TaskDetailFloatingActionsProps>
   return (
     <Animated.View
       entering={FadeInUp.delay(800).duration(600)}
-      className="absolute bottom-6 right-6 flex-row gap-3"
-      style={animatedFabStyle}
+      style={[
+        {
+          position: 'absolute',
+          bottom: 24,
+          right: 24,
+          flexDirection: 'row',
+          gap: 12,
+        },
+        animatedFabStyle,
+      ]}
     >
-      <TouchableOpacity
-        onPress={() => handlePress(onEditPress)}
-        className="w-14 h-14 bg-white rounded-full items-center justify-center shadow-lg border border-gray-200"
-      >
-        <MaterialIcon name="edit" size={20} color="#6B7280" />
-      </TouchableOpacity>
+      {showDeleteButton && (
+        <TouchableOpacity
+          onPress={() => handlePress(onDeletePress)}
+          style={{
+            width: 56,
+            height: 56,
+            backgroundColor: 'white',
+            borderRadius: 28,
+            alignItems: 'center',
+            justifyContent: 'center',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 3.84,
+            elevation: 5,
+            borderWidth: 1,
+            borderColor: '#FEE2E2',
+          }}
+        >
+          <MaterialIcon name="delete" size={20} color="#EF4444" />
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         onPress={() => handlePress(onCompletePress)}
-        className="w-14 h-14 rounded-full shadow-lg border border-gray-200"
-       
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 3.84,
+          elevation: 5,
+          borderWidth: 1,
+          borderColor: '#E5E7EB',
+        }}
       >
         <LinearGradient
           colors={['#2563EB', '#7C3AED']}
-         style={{ flex: 1, borderRadius: 9999, alignItems: 'center', justifyContent: 'center' }}
+          style={{ flex: 1, borderRadius: 28, alignItems: 'center', justifyContent: 'center' }}
         >
           <MaterialIcon name="done" size={24} color="white" />
         </LinearGradient>

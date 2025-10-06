@@ -5,43 +5,41 @@ import {
   TouchableOpacity,
   Animated,
   Pressable,
-  Alert,
 } from 'react-native';
 import { format, isToday, isYesterday } from 'date-fns';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import Feather from 'react-native-vector-icons/Feather';
 import { Avatar } from '../common/Avatar';
-import { MessageReactions } from './MessageReactions';
 import { MessageAttachments } from './MessageAttachments';
-import { EmojiPicker } from './EmojiPicker';
+import { ActionDialog } from '../common/ActionDialog';
 import type { Message as MessageType } from '../../types/message';
 
 interface MessageProps {
   message: MessageType;
   currentUserId: string;
+  currentUser?: any;
   showAvatar?: boolean;
   isGrouped?: boolean;
   onReply?: (message: MessageType) => void;
   onEdit?: (message: MessageType) => void;
   onDelete?: (messageId: string) => void;
-  onReaction?: (messageId: string, emoji: string) => void;
   onUserPress?: (userId: string) => void;
 }
 
 export const Message: React.FC<MessageProps> = ({
   message,
   currentUserId,
+  currentUser,
   showAvatar = true,
   isGrouped = false,
   onReply,
   onEdit,
   onDelete,
-  onReaction,
   onUserPress,
 }) => {
   // Always call hooks at the top, before any conditional logic
   const [showActions, setShowActions] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const scaleValue = useRef(new Animated.Value(1)).current;
   
   // Early return for null/undefined messages
@@ -67,18 +65,22 @@ export const Message: React.FC<MessageProps> = ({
     );
   }
   
-  // console.log('💬 Message: Rendering message:', message.id, message);
-  // Handle missing user_details gracefully
-  const userDetails = {
-    id: message.user_id,
-    name: message?.user_name || 'Unknown User',
-    avatar_url:
-      message?.user_avatar || undefined,
-    role: message.user_role || undefined,
+  // Extract user details - use current user only for own messages when missing
+  const userDetails = message.user_details ? {
+    id: message.user_details.id,
+    name: message.user_details.name,
+    avatar_url: message.user_details.avatar_url,
+    role: message.user_details.role,
+  } : {
+    id: message.user_id || currentUser?.id || currentUserId,
+    name: message.user_name || currentUser?.name || 'Unknown User',
+    avatar_url: currentUser?.avatar_url,
+    role: currentUser?.role,
   };
   const isOwnMessage = userDetails?.id === currentUserId;
-  const canEdit = isOwnMessage && !message.deleted_at;
-  const canDelete = isOwnMessage && !message.deleted_at;
+  const isCEO = currentUser?.role === 'ceo';
+  const canEdit = (isOwnMessage || isCEO) && !message.deleted_at;
+  const canDelete = (isOwnMessage || isCEO) && !message.deleted_at;
 
 
   const formatTime = (timestamp: Date | null | undefined) => {
@@ -126,9 +128,6 @@ export const Message: React.FC<MessageProps> = ({
     }).start();
   };
 
-  const handleReactionPress = (emoji: string) => {
-    onReaction?.(message.id, emoji);
-  };
 
   return (
     <Animated.View
@@ -146,11 +145,11 @@ export const Message: React.FC<MessageProps> = ({
         }}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        className={`flex-row ${isGrouped ? 'mt-0.5' : 'mt-3'}`}
+        className={`${isOwnMessage ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-3'}`}
       >
         {/* Avatar */}
-        <View className="w-10 mr-3">
-          {showAvatar && !isGrouped ? (
+        <View className={`w-10 ${isOwnMessage ? 'ml-3' : 'mr-3'}`}>
+          {showAvatar ? (
             <TouchableOpacity onPress={() => onUserPress?.(userDetails.id)}>
               <Avatar
                 user={{
@@ -168,12 +167,13 @@ export const Message: React.FC<MessageProps> = ({
         </View>
 
         {/* Message Content */}
-        <View className="flex-1">
+        <View className={`${isOwnMessage ? 'max-w-[80%]' : 'flex-1'}`}>
+          <View className={`${isOwnMessage ? 'bg-blue-500 rounded-2xl rounded-br-md px-4 py-2' : ''}`}>
           {/* Header */}
-          {!isGrouped && (
+          {(
             <View className="flex-row items-center mb-1">
               <TouchableOpacity onPress={() => onUserPress?.(userDetails.id)}>
-                <Text className="font-semibold text-gray-900 text-base">
+                <Text className={`font-semibold text-base ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
                   {userDetails.name}
                 </Text>
               </TouchableOpacity>
@@ -184,7 +184,7 @@ export const Message: React.FC<MessageProps> = ({
                   </Text>
                 </View>
               )}
-              <Text className="ml-2 text-gray-500 text-sm">
+              <Text className={`ml-2 text-sm ${isOwnMessage ? 'text-blue-100' : 'text-gray-500'}`}>
                 {formatTime(new Date(message.created_at))}
               </Text>
               {message.is_edited && (
@@ -199,7 +199,7 @@ export const Message: React.FC<MessageProps> = ({
 
           {/* Message Text */}
           <View className="mb-1">
-            <Text className="text-gray-900 text-base leading-5">
+            <Text className={`text-base leading-5 ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
               {message.content}
             </Text>
           </View>
@@ -210,14 +210,6 @@ export const Message: React.FC<MessageProps> = ({
           )}
 
 
-          {/* Reactions */}
-          {message.reactions && message.reactions.length > 0 && (
-            <MessageReactions
-              reactions={message.reactions}
-              onReactionPress={handleReactionPress}
-              currentUserId={currentUserId}
-            />
-          )}
 
           {/* Action Buttons */}
           {showActions && (
@@ -234,17 +226,6 @@ export const Message: React.FC<MessageProps> = ({
                 <Text className="ml-1 text-blue-600 text-sm font-medium">Reply</Text>
               </TouchableOpacity>
 
-              {/* React Button */}
-              <TouchableOpacity
-                onPress={() => {
-                  setShowEmojiPicker(true);
-                  setShowActions(false);
-                }}
-                className="flex-row items-center bg-yellow-100 px-3 py-2 rounded-full mr-2"
-              >
-                <Text className="text-yellow-600 text-base">😀</Text>
-                <Text className="ml-1 text-yellow-600 text-sm font-medium">React</Text>
-              </TouchableOpacity>
 
               {/* Edit Button (only for own messages) */}
               {canEdit && (
@@ -265,18 +246,7 @@ export const Message: React.FC<MessageProps> = ({
                 <TouchableOpacity
                   onPress={() => {
                     setShowActions(false);
-                    Alert.alert(
-                      'Delete Message',
-                      'Are you sure you want to delete this message?',
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Delete',
-                          style: 'destructive',
-                          onPress: () => onDelete?.(message.id),
-                        },
-                      ]
-                    );
+                    setShowDeleteDialog(true);
                   }}
                   className="flex-row items-center bg-red-100 px-3 py-2 rounded-full mr-2"
                 >
@@ -302,21 +272,33 @@ export const Message: React.FC<MessageProps> = ({
               <Text className="ml-1 text-red-500 text-xs">Failed to send</Text>
             </View>
           )}
+          </View>
         </View>
       </Pressable>
 
-      {/* Emoji Picker Modal */}
-      <EmojiPicker
-        visible={showEmojiPicker}
-        onClose={() => setShowEmojiPicker(false)}
-        onEmojiSelect={(emoji) => {
-          try {
-            console.log('💬 Message: Emoji selected for message:', message.id, emoji);
-            onReaction?.(message.id, emoji);
-          } catch (error) {
-            console.error('🚨 Message: Error calling onReaction:', error);
-          }
-        }}
+
+      {/* Delete Confirmation Dialog */}
+      <ActionDialog
+        visible={showDeleteDialog}
+        title="Delete Message"
+        message="Are you sure you want to delete this message? This action cannot be undone."
+        type="error"
+        actions={[
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => {},
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            icon: 'delete',
+            onPress: () => {
+              onDelete?.(message.id);
+            },
+          },
+        ]}
+        onClose={() => setShowDeleteDialog(false)}
       />
     </Animated.View>
   );
