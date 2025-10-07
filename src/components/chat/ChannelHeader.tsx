@@ -6,7 +6,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
 } from 'react-native-reanimated';
-import { Avatar } from '../common/Avatar';
+import { Avatar } from '../common/EnhancedAvatar';
 
 interface ChannelHeaderProps {
   channelName: string;

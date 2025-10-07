@@ -7,7 +7,7 @@ import Animated, {
 
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { TaskComment, TaskAssignee } from '../../types/task.types';
-import { Avatar } from '../common/Avatar';
+import { Avatar } from '../common/EnhancedAvatar';
 import { PromptInput } from '../voice/PromptInput';
 import { ActionSheet } from '../common/ActionSheet';
 

@@ -3,6 +3,7 @@ import { AuthError } from './authService';
 import { tokenManager } from '../tokenManager';
 import { API_BASE_URL } from '../../config/api';
 import { ErrorHandler } from '../../utils/errorHandler';
+import { ImageStorageService } from '../storage/imageStorageService';
 
 export interface User {
   id: string;
@@ -396,58 +397,115 @@ class UserService {
     return response.data;
   }
 
-  // Delete profile picture
+  // Delete profile picture (both remote and local)
   async deleteProfilePicture(userId: string): Promise<User> {
-    const response = await this.makeRequest<ApiResponse<User>>(
-      `/users/${userId}/profile-picture`,
-      {
-        method: 'DELETE',
+    try {
+      // Delete from server first (this will also delete from Cloudinary)
+      const response = await this.makeRequest<{
+        success: boolean;
+        data: User;
+        message: string;
+        timestamp: string;
+      }>(
+        `/users/${userId}/profile-picture`,
+        {
+          method: 'DELETE',
+        }
+      );
+      
+      // Delete local storage
+      await ImageStorageService.deleteStoredImage(userId);
+      console.log('✅ Profile picture deleted from both Cloudinary and local storage');
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to delete profile picture from server:', error);
+      
+      // Even if server deletion fails, try to delete locally
+      await ImageStorageService.deleteStoredImage(userId);
+      console.log('✅ Profile picture deleted from local storage (server deletion failed)');
+      
+      // Re-throw the original error
+      if (error instanceof AuthError) {
+        throw error;
       }
-    );
-    return response.data;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new AuthError('Failed to delete profile picture: ' + errorMessage, 'DELETE_FAILED');
+    }
   }
 
-  // Upload profile picture using backend's recommended 3-step S3 process
+  // Get profile picture URL (prioritizes local storage, falls back to remote)
+  async getProfilePictureUrl(userId: string): Promise<string | null> {
+    try {
+      // First try to get local image
+      const localUri = await ImageStorageService.getLocalImageUri(userId);
+      if (localUri) {
+        console.log('🖼️ Using local profile image for user:', userId);
+        return localUri;
+      }
+      
+      // If no local image, get user data and return remote avatar_url
+      const user = await this.getUserById(userId);
+      if (user.avatar_url) {
+        console.log('☁️ Using remote profile image for user:', userId);
+        return user.avatar_url;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Failed to get profile picture URL:', error);
+      return null;
+    }
+  }
+
+  // Upload profile picture using backend's multipart upload with Cloudinary
   async uploadProfilePicture(userId: string, imageUri: string, fileName: string, mimeType: string): Promise<User> {
-    let uploadData: { uploadUrl: string; fileId: string; downloadUrl?: string } | null = null;
+    let storedImage: any = null;
     
     try {
-      console.log('🖼️ Starting profile picture upload (3-step S3 process):', { userId, imageUri, fileName, mimeType });
+      console.log('🖼️ Starting profile picture upload with Cloudinary:', { userId, imageUri, fileName, mimeType });
       
-      // Step 1: Initiate upload and get presigned URL
-      console.log('📤 Step 1: Initiating upload...');
-      uploadData = await this.initiateProfilePictureUpload(userId, fileName, mimeType);
-      console.log('✅ Upload initiated:', uploadData);
+      // Step 1: Store image locally first for immediate display
+      console.log('💾 Step 1: Storing image locally...');
+      storedImage = await ImageStorageService.storeProfileImage(userId, imageUri, fileName, mimeType);
+      console.log('✅ Image stored locally:', storedImage.localPath);
       
-      // Step 2: Upload file directly to S3 using presigned URL
-      console.log('☁️ Step 2: Uploading to S3...');
-      const uploadSuccess = await this.uploadToS3(uploadData.uploadUrl, imageUri, mimeType);
-      console.log('✅ S3 upload success:', uploadSuccess);
-      
-      // Step 3: Complete the upload process with success
-      console.log('🏁 Step 3: Completing upload...');
-      const result = await this.completeProfilePictureUpload(userId, uploadData.fileId, true);
+      // Step 2: Upload to backend using multipart form data
+      console.log('☁️ Step 2: Uploading to backend with Cloudinary...');
+      const result = await this.updateProfileWithPicture(userId, {}, imageUri, fileName, mimeType);
       console.log('✅ Upload completed successfully:', result);
+      
+      // Step 3: Update local storage with remote path
+      if (result.avatar_url && storedImage) {
+        await ImageStorageService.updateImageUploadStatus(storedImage.id, result.avatar_url, true);
+        console.log('✅ Local storage updated with remote path');
+      }
       
       return result;
       
     } catch (error) {
       console.error('❌ Profile picture upload error:', error);
       
-      // If we got an upload data, complete with failure
-      if (uploadData?.fileId) {
+      // Even if upload fails, we have the image locally, so return a user object with local path
+      if (storedImage) {
+        console.log('💾 Upload failed but image is stored locally, getting current user...');
         try {
-          console.log('🔄 Completing upload with failure status...');
-          await this.completeProfilePictureUpload(userId, uploadData.fileId, false, error.message);
-        } catch (completeError) {
-          console.error('❌ Failed to complete upload with error status:', completeError);
+          const currentUser = await this.getCurrentUser();
+          // Return user with local image path - the UI will handle displaying local images
+          return {
+            ...currentUser,
+            avatar_url: undefined, // Clear remote URL since upload failed
+          };
+        } catch (getUserError) {
+          console.error('❌ Failed to get current user after upload failure:', getUserError);
         }
       }
       
       if (error instanceof AuthError) {
         throw error;
       }
-      throw new AuthError('Failed to upload profile picture: ' + error.message, 'UPLOAD_FAILED');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new AuthError('Failed to upload profile picture: ' + errorMessage, 'UPLOAD_FAILED');
     }
   }
 

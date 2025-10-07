@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import "./global.css";
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
@@ -8,10 +8,16 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/contexts/ToastContext';
 import { UIProvider } from './src/components/common/UIProvider';
 import { AuthorizationProvider } from './src/contexts/AuthorizationContext';
+import { StorageInitializer } from './src/services/storage/initializeStorage';
 
 // Voice testing utilities were removed during cleanup
 
 export default function App() {
+  useEffect(() => {
+    // Initialize storage services on app startup
+    StorageInitializer.initialize();
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Provider store={store}>

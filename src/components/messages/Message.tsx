@@ -9,7 +9,7 @@ import {
 import { format, isToday, isYesterday } from 'date-fns';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import Feather from 'react-native-vector-icons/Feather';
-import { Avatar } from '../common/Avatar';
+import { Avatar } from '../common/EnhancedAvatar';
 import { MessageAttachments } from './MessageAttachments';
 import { ActionDialog } from '../common/ActionDialog';
 import type { Message as MessageType } from '../../types/message';
@@ -155,7 +155,7 @@ export const Message: React.FC<MessageProps> = ({
                 user={{
                   id: userDetails.id,
                   name: userDetails.name,
-                  avatar: userDetails.avatar_url || userDetails.name.charAt(0).toUpperCase()!,
+                  avatar_url: userDetails.avatar_url,
                   role: userDetails.role,
                   isOnline: userDetails.id === currentUserId
                 }}

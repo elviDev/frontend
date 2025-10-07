@@ -158,6 +158,11 @@ export const authSlice = createSlice({
     updateUser: (state, action: PayloadAction<User>) => {
       state.user = action.payload;
     },
+    updateUserAvatar: (state, action: PayloadAction<{ avatar_url: string | null }>) => {
+      if (state.user) {
+        state.user.avatar_url = action.payload.avatar_url || undefined;
+      }
+    },
   },
   extraReducers: (builder) => {
     // Login
@@ -311,6 +316,6 @@ export const authSlice = createSlice({
   },
 });
 
-export const { clearError, setAuthenticated, clearAuth, updateTokensFromManager, updateUser } = authSlice.actions;
+export const { clearError, setAuthenticated, clearAuth, updateTokensFromManager, updateUser, updateUserAvatar } = authSlice.actions;
 
 export default authSlice.reducer;

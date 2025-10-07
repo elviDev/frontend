@@ -33,7 +33,7 @@ import { userService, User, UpdateUserData, ChangePasswordData } from '../../ser
 import { AuthError } from '../../services/api/authService';
 import { useAuth } from '../../hooks/useAuth';
 import { useDispatch } from 'react-redux';
-import { updateUserProfile, updateUser } from '../../store/slices/authSlice';
+import { updateUserProfile, updateUser, updateUserAvatar } from '../../store/slices/authSlice';
 import type { AppDispatch } from '../../store/store';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { announcementService, CreateAnnouncementData } from '../../services/api/announcementService';
@@ -42,6 +42,8 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { LanguageSwitcher } from '../../components/common/LanguageSwitcher';
 import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType } from 'react-native-image-picker';
+import { ImageStorageService } from '../../services/storage/imageStorageService';
+import { ProfileImage, ProfileImageXXL } from '../../components/common/ProfileImage';
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -69,6 +71,7 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
   const [isCreatingAnnouncement, setIsCreatingAnnouncement] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
+  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
 
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -142,7 +145,22 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
     contentTranslateY.value = withSpring(0, { damping: 15, stiffness: 100 });
     
     loadUserProfile();
+    loadLocalImage();
   }, [targetUserId]);
+
+  const loadLocalImage = async () => {
+    if (!targetUserId) return;
+    
+    try {
+      const localUri = await ImageStorageService.getLocalImageUri(targetUserId);
+      setLocalImageUri(localUri);
+      if (localUri) {
+        console.log('📱 Local profile image loaded for user:', targetUserId);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load local image:', error);
+    }
+  };
 
   const loadUserProfile = async () => {
     if (!targetUserId) {
@@ -441,8 +459,8 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
       return; // Do nothing if not own profile
     }
 
-    if (user?.avatar_url) {
-      // Show full-screen image viewer if user has profile picture
+    if (localImageUri || user?.avatar_url) {
+      // Show full-screen image viewer if user has profile picture (local or remote)
       setShowImageViewer(true);
     } else {
       // Show image picker directly if no profile picture exists
@@ -537,7 +555,12 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
       // If this is own profile, sync with Redux
       if (isOwnProfile) {
         dispatch(updateUser(updatedUser));
+        // Also specifically update the avatar across the app
+        dispatch(updateUserAvatar({ avatar_url: updatedUser.avatar_url || null }));
       }
+      
+      // Refresh local image to show the newly stored image
+      await loadLocalImage();
       
       // Close any open modals
       setShowImageViewer(false);
@@ -584,7 +607,12 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
           // If this is own profile, sync with Redux
           if (isOwnProfile) {
             dispatch(updateUser(updatedUser));
+            // Also specifically clear the avatar across the app
+            dispatch(updateUserAvatar({ avatar_url: null }));
           }
+          
+          // Clear local image
+          setLocalImageUri(null);
           
           // Close any open modals
           setShowImageViewer(false);
@@ -757,10 +785,10 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                 activeOpacity={isOwnProfile ? 0.7 : 1}
                 className="relative"
               >
-                {user.avatar_url ? (
+                {(localImageUri || user.avatar_url) ? (
                   <View className="relative">
                     <Image
-                      source={{ uri: user.avatar_url }}
+                      source={{ uri: localImageUri || user.avatar_url }}
                       style={{
                         width: 100,
                         height: 100,
@@ -769,7 +797,13 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
                       }}
                       onError={() => {
                         // Handle image loading error by falling back to gradient avatar
-                        setUser(prev => prev ? { ...prev, avatar_url: undefined } : null);
+                        if (localImageUri) {
+                          // If local image failed, clear it and try remote
+                          setLocalImageUri(null);
+                        } else {
+                          // If remote image failed, clear it
+                          setUser(prev => prev ? { ...prev, avatar_url: undefined } : null);
+                        }
                       }}
                     />
                     {isUploadingImage && (
@@ -1507,9 +1541,9 @@ export const UserProfileScreen: React.FC<{ navigation: any; route: any }> = ({
               </TouchableOpacity>
 
               {/* Profile Image */}
-              {user?.avatar_url && (
+              {(localImageUri || user?.avatar_url) && (
                 <Image
-                  source={{ uri: user.avatar_url }}
+                  source={{ uri: localImageUri || user.avatar_url }}
                   style={{
                     width: '90%',
                     maxWidth: 400,

@@ -4,7 +4,7 @@ import Animated, { FadeInDown, SlideInRight, BounceIn } from 'react-native-reani
 import LinearGradient from 'react-native-linear-gradient';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
 import { TaskAssignee } from '../../types/task.types';
-import { Avatar } from '../common/Avatar';
+import { Avatar } from '../common/EnhancedAvatar';
 
 interface TaskTeamAssignmentProps {
   assignees: TaskAssignee[];
